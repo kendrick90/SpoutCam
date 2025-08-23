@@ -2,6 +2,7 @@
 #include <conio.h>
 #include <olectl.h>
 #include <dshow.h>
+#include <commctrl.h>
 
 #include "cam.h"
 
@@ -12,6 +13,11 @@
 
 // For dialog drawing
 static HBRUSH g_hbrBkgnd = NULL;
+
+// Tab control management
+static int g_currentCameraTab = 0;
+static int g_maxCameraCount = 8;  // Support up to 8 camera instances
+static int g_activeCameras = 1;   // Start with 1 camera tab
 
 // CreateInstance
 // Used by the DirectShow base classes to create instances
@@ -109,19 +115,57 @@ INT_PTR CSpoutCamProperties::OnReceiveMessage(HWND hwnd, UINT uMsg, WPARAM wPara
 						m_bSilent = FALSE;
 					break;
 
+				case IDC_MIRROR:
+					// Apply mirror setting immediately
+					ApplyRealTimeSettings();
+					break;
+
+				case IDC_FLIP:
+					// Apply flip setting immediately  
+					ApplyRealTimeSettings();
+					break;
+
+				case IDC_SWAP:
+					// Apply swap setting immediately
+					ApplyRealTimeSettings();
+					break;
+
 				case IDC_REFRESH:
 					// Refresh the available senders list
 					RefreshSenderList();
 					break;
 
 				case IDC_REGISTER:
-					// Register all SpoutCam cameras
-					RegisterCameras();
+					// Register this specific camera
+					{
+						int cameraIndex = 0;
+						GetCameraIndex(&cameraIndex);
+						RegisterSingleCamera(cameraIndex);
+					}
 					break;
 
 				case IDC_UNREGISTER:
+					// Unregister this specific camera
+					{
+						int cameraIndex = 0;
+						GetCameraIndex(&cameraIndex);
+						UnregisterSingleCamera(cameraIndex);
+					}
+					break;
+
+				case IDC_UNREGISTER_ALL:
 					// Unregister all SpoutCam cameras
 					UnregisterCameras();
+					break;
+
+				case IDC_ADD_CAMERA:
+					// Add a new camera tab
+					AddCameraTab();
+					break;
+
+				case IDC_REMOVE_CAMERA:
+					// Remove current camera tab
+					RemoveCameraTab();
 					break;
 
 				case IDC_SENDER_LIST:
@@ -156,6 +200,17 @@ INT_PTR CSpoutCamProperties::OnReceiveMessage(HWND hwnd, UINT uMsg, WPARAM wPara
 			}
 
 			return (LRESULT)1;
+		}
+
+	case WM_NOTIFY:
+		{
+			LPNMHDR lpnmhdr = (LPNMHDR)lParam;
+			if (lpnmhdr->idFrom == IDC_CAMERA_TABS && lpnmhdr->code == TCN_SELCHANGE) {
+				// Tab selection changed
+				OnTabSelectionChange();
+				return (LRESULT)1;
+			}
+			break;
 		}
 	}
 
@@ -205,8 +260,6 @@ HRESULT CSpoutCamProperties::OnActivate()
 
 	HWND hwndCtl = nullptr;
 	DWORD dwValue = 0;
-	wchar_t wname[256];
-	char name[256];
 
 	////////////////////////////////////////
 	// Initialize Enhanced UI Elements
@@ -222,11 +275,8 @@ HRESULT CSpoutCamProperties::OnActivate()
 	// Fps
 	////////////////////////////////////////
 
-	// Retrieve fps from registry
-	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "fps", &dwValue) || dwValue > 5)
-	{
-		dwValue = 3; // default 3 = 30 fps
-	}
+	// Initialize fps dropdown with defaults (actual values loaded per-camera by InitializeTabControl)
+	dwValue = 1; // default 1 = 30 fps
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_FPS);
 	
@@ -257,11 +307,8 @@ HRESULT CSpoutCamProperties::OnActivate()
 	// Resolution
 	////////////////////////////////////////
 
-	// Retrieve resolution from registry "SpoutCamConfig"
-	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "resolution", &dwValue) || dwValue > 10)
-	{
-		dwValue = 0; // default 0 = active sender
-	}
+	// Initialize resolution dropdown with defaults (actual values loaded per-camera by InitializeTabControl)
+	dwValue = 0; // default 0 = active sender
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_RESOLUTION);
 
@@ -295,52 +342,21 @@ HRESULT CSpoutCamProperties::OnActivate()
 	// Starting sender name
 	////////////////////////////////////////
 
-	// Note - registry read is not wide chars
-	if (!ReadPathFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "senderstart", name))
-	{
-		wname[0] = 0;
-	}
-	if (wname[0] != 0) {
-		// Convert registry char* string to a wchar_t* string.
-		size_t convertedChars = 0;
-		mbstowcs_s(&convertedChars, wname, 256, name, 256);
-		// Show it in the dialog edit control
-		hwndCtl = GetDlgItem(this->m_Dlg, IDC_NAME);
-		Edit_SetText(hwndCtl, wname);
-	}
+	// Initialize sender name (actual values loaded per-camera by InitializeTabControl)
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_NAME);
+	Edit_SetText(hwndCtl, L"");
 
 	////////////////////////////////////////
-	// Mirror image
+	// Mirror, Swap, Flip - Initialize with defaults (actual values loaded per-camera by InitializeTabControl)
 	////////////////////////////////////////
-	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "mirror", &dwValue))
-	{
-		dwValue = 0;
-	}
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_MIRROR);
-	Button_SetCheck(hwndCtl, dwValue);
+	Button_SetCheck(hwndCtl, 0);
 
-	////////////////////////////////////////
-	// Swap RGB <> BGR
-	////////////////////////////////////////
-	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "swap", &dwValue))
-	{
-		dwValue = 0;
-	}
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_SWAP);
-	Button_SetCheck(hwndCtl, dwValue);
+	Button_SetCheck(hwndCtl, 0);
 
-	////////////////////////////////////////
-	// Flip image
-	// Default is flipped due to upside down Windows bitmap
-	// If set false, the result comes out inverted
-	// bInvert = false;
-	////////////////////////////////////////
-	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "flip", &dwValue))
-	{
-		dwValue = 0;
-	}
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_FLIP);
-	Button_SetCheck(hwndCtl, dwValue);
+	Button_SetCheck(hwndCtl, 0);
 
 	// Warning disable mode
 	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "silent", &dwValue))
@@ -354,6 +370,9 @@ HRESULT CSpoutCamProperties::OnActivate()
 	// Show SpoutCam version
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_VERS);
 	Static_SetText(hwndCtl, L"Version: " _VER_VERSION_STRING);
+
+	// Initialize tab control
+	InitializeTabControl();
 
 	m_bIsInitialized = TRUE;
 
@@ -381,57 +400,74 @@ HRESULT CSpoutCamProperties::OnApplyChanges()
 	DWORD dwFps, dwResolution, dwMirror, dwSwap, dwFlip, dwSilent;
 	wchar_t wname[256];
 	char name[256];
+	char keyName[256];
+
+	// Create camera-specific registry key for current tab
+	sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
 
 	// =================================
 	// Get old fps and resolution for user warning
 	DWORD dwOldFps, dwOldResolution;
-	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "fps", &dwOldFps);
-	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "resolution", &dwOldResolution);
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "fps", &dwOldFps);
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "resolution", &dwOldResolution);
 	dwFps = ComboBox_GetCurSel(GetDlgItem(this->m_Dlg, IDC_FPS));
 	dwResolution = ComboBox_GetCurSel(GetDlgItem(this->m_Dlg, IDC_RESOLUTION));
-	// Warn unless disabled
+	// Warn unless disabled (only for fps/resolution changes that require restart)
+	bool needsReregistration = false;
 	if (!m_bSilent) {
 		if (dwOldFps != dwFps || dwOldResolution != dwResolution) {
-			if (MessageBoxA(NULL, "For change of resolution or fps, you\nhave to stop and re-start SpoutCam\nDo you want to change ? ", "Warning", MB_YESNO | MB_TOPMOST | MB_ICONQUESTION) == IDNO) {
+			wchar_t warningMsg[256];
+			swprintf_s(warningMsg, L"Resolution or FPS change on SpoutCam%d requires reregistration.\n\nClick OK to automatically reregister the camera with new settings.\nClick Cancel to revert changes.", g_currentCameraTab + 1);
+			if (MessageBoxW(NULL, warningMsg, L"Camera Reregistration Required", MB_OKCANCEL | MB_TOPMOST | MB_ICONQUESTION) == IDCANCEL) {
 				if (dwOldFps != dwFps)
 					ComboBox_SetCurSel(GetDlgItem(this->m_Dlg, IDC_FPS), dwOldFps);
 				if (dwOldResolution != dwResolution)
 					ComboBox_SetCurSel(GetDlgItem(this->m_Dlg, IDC_RESOLUTION), dwOldResolution);
 				return -1;
 			}
+			needsReregistration = true;
 		}
+	} else if (dwOldFps != dwFps || dwOldResolution != dwResolution) {
+		// Silent mode - still need reregistration, just no dialog
+		needsReregistration = true;
 	}
-	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "fps", dwFps);
-	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "resolution", dwResolution);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "fps", dwFps);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "resolution", dwResolution);
 	// =================================
 
-	// If properties is implemented, the dialog may need to be updated 
-	// to be the same as SpoutCamSettings
+	// Sender name settings
 	HWND hwndCtl = GetDlgItem(this->m_Dlg, IDC_NAME);
 	wname[0] = 0;
 	Edit_GetText(hwndCtl, wname, 256);
 	size_t convertedChars = 0;
 	wcstombs_s(&convertedChars, name, 256, wname, _TRUNCATE);
-	WritePathToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "senderstart", name);
+	WritePathToRegistry(HKEY_CURRENT_USER, keyName, "senderstart", name);
 
+	// Mirror, Swap, Flip settings - these should apply immediately
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_MIRROR);
 	dwMirror = Button_GetCheck(hwndCtl);
-	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "mirror", dwMirror);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "mirror", dwMirror);
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_SWAP);
 	dwSwap = Button_GetCheck(hwndCtl);
-	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "swap", dwSwap);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "swap", dwSwap);
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_FLIP);
 	dwFlip = Button_GetCheck(hwndCtl);
-	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "flip", dwFlip);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "flip", dwFlip);
 
-	// Silent mode is set only by the properties dialog
+	// Silent mode is global, not per-camera
 	dwSilent = Button_GetCheck(GetDlgItem(this->m_Dlg, IDC_SILENT));
 	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "silent", dwSilent);
 	
+	// Apply settings to the camera filter for immediate effect
 	if (m_pCamSettings)
 		m_pCamSettings->put_Settings(dwFps, dwResolution, dwMirror, dwSwap, dwFlip, name);
+
+	// Perform automatic reregistration if needed for FPS/resolution changes
+	if (needsReregistration) {
+		AutoReregisterCamera();
+	}
 
 	return S_OK;
 }
@@ -445,12 +481,8 @@ HRESULT CSpoutCamProperties::GetCameraIndex(int* pCameraIndex)
 {
 	if (!pCameraIndex) return E_POINTER;
 	
-	// Try to get the camera index from the parent filter
-	// We'll need to query the filter's CLSID and map it to camera index
-	*pCameraIndex = 0; // Default to first camera
-	
-	// TODO: Implement CLSID-to-camera-index mapping
-	// For now, we'll determine based on the registry keys that exist
+	// Return the currently selected camera tab index
+	*pCameraIndex = g_currentCameraTab;
 	
 	return S_OK;
 }
@@ -540,7 +572,7 @@ void CSpoutCamProperties::RegisterCameras()
 	}
 }
 
-// Unregister all SpoutCam cameras
+// Unregister all SpoutCam cameras - simplified without UAC elevation for now
 void CSpoutCamProperties::UnregisterCameras()
 {
 	HRESULT hr = RegisterFilters(FALSE);
@@ -550,5 +582,390 @@ void CSpoutCamProperties::UnregisterCameras()
 		}
 	} else {
 		MessageBox(m_Dlg, L"Failed to unregister SpoutCam cameras.\n\nThis may require administrator privileges.", L"Unregistration Error", MB_OK | MB_ICONERROR);
+	}
+}
+
+// Register single camera - simplified without UAC elevation for now  
+void CSpoutCamProperties::RegisterSingleCamera(int cameraIndex)
+{
+	HRESULT hr = RegisterSingleCameraFilter(TRUE, cameraIndex);
+	if (SUCCEEDED(hr)) {
+		if (!m_bSilent) {
+			wchar_t message[256];
+			swprintf_s(message, L"SpoutCam%d registered successfully!", cameraIndex + 1);
+			MessageBox(m_Dlg, message, L"Registration", MB_OK | MB_ICONINFORMATION);
+		}
+	} else {
+		wchar_t message[256];
+		swprintf_s(message, L"Failed to register SpoutCam%d.\n\nThis may require administrator privileges.", cameraIndex + 1);
+		MessageBox(m_Dlg, message, L"Registration Error", MB_OK | MB_ICONERROR);
+	}
+}
+
+// Unregister single camera - simplified without UAC elevation for now
+void CSpoutCamProperties::UnregisterSingleCamera(int cameraIndex)
+{
+	HRESULT hr = RegisterSingleCameraFilter(FALSE, cameraIndex);
+	if (SUCCEEDED(hr)) {
+		if (!m_bSilent) {
+			wchar_t message[256];
+			swprintf_s(message, L"SpoutCam%d unregistered successfully!", cameraIndex + 1);
+			MessageBox(m_Dlg, message, L"Unregistration", MB_OK | MB_ICONINFORMATION);
+		}
+	} else {
+		wchar_t message[256];
+		swprintf_s(message, L"Failed to unregister SpoutCam%d.\n\nThis may require administrator privileges.", cameraIndex + 1);
+		MessageBox(m_Dlg, message, L"Unregistration Error", MB_OK | MB_ICONERROR);
+	}
+}
+
+// Initialize the tab control with the first camera tab
+void CSpoutCamProperties::InitializeTabControl()
+{
+	HWND hwndTab = GetDlgItem(this->m_Dlg, IDC_CAMERA_TABS);
+	if (!hwndTab) return;
+
+	// Add the first tab
+	TCITEM tie = {0};
+	tie.mask = TCIF_TEXT;
+	tie.pszText = L"SpoutCam1";
+	TabCtrl_InsertItem(hwndTab, 0, &tie);
+
+	// Select the first tab
+	TabCtrl_SetCurSel(hwndTab, 0);
+	g_currentCameraTab = 0;
+	
+	// Update the display for the first camera
+	UpdateCameraDisplay();
+}
+
+// Add a new camera tab
+void CSpoutCamProperties::AddCameraTab()
+{
+	if (g_activeCameras >= g_maxCameraCount) {
+		MessageBox(m_Dlg, L"Maximum number of cameras reached!", L"Add Camera", MB_OK | MB_ICONWARNING);
+		return;
+	}
+
+	HWND hwndTab = GetDlgItem(this->m_Dlg, IDC_CAMERA_TABS);
+	if (!hwndTab) return;
+
+	// Add new tab
+	TCITEM tie = {0};
+	tie.mask = TCIF_TEXT;
+	
+	wchar_t tabName[32];
+	swprintf_s(tabName, L"SpoutCam%d", g_activeCameras + 1);
+	tie.pszText = tabName;
+	
+	TabCtrl_InsertItem(hwndTab, g_activeCameras, &tie);
+	g_activeCameras++;
+	
+	// Select the new tab
+	TabCtrl_SetCurSel(hwndTab, g_activeCameras - 1);
+	g_currentCameraTab = g_activeCameras - 1;
+	
+	// Update display for new camera
+	UpdateCameraDisplay();
+}
+
+// Remove the current camera tab
+void CSpoutCamProperties::RemoveCameraTab()
+{
+	if (g_activeCameras <= 1) {
+		MessageBox(m_Dlg, L"Cannot remove the last camera!", L"Remove Camera", MB_OK | MB_ICONWARNING);
+		return;
+	}
+
+	HWND hwndTab = GetDlgItem(this->m_Dlg, IDC_CAMERA_TABS);
+	if (!hwndTab) return;
+
+	// Remove the current tab
+	TabCtrl_DeleteItem(hwndTab, g_currentCameraTab);
+	g_activeCameras--;
+	
+	// Adjust current tab selection
+	if (g_currentCameraTab >= g_activeCameras) {
+		g_currentCameraTab = g_activeCameras - 1;
+	}
+	
+	TabCtrl_SetCurSel(hwndTab, g_currentCameraTab);
+	
+	// Update display for current camera
+	UpdateCameraDisplay();
+}
+
+// Handle tab selection change
+void CSpoutCamProperties::OnTabSelectionChange()
+{
+	HWND hwndTab = GetDlgItem(this->m_Dlg, IDC_CAMERA_TABS);
+	if (!hwndTab) return;
+
+	// Save current camera settings before switching
+	SaveCurrentCameraSettings();
+	
+	// Get new selection
+	g_currentCameraTab = TabCtrl_GetCurSel(hwndTab);
+	
+	// Update display for selected camera
+	UpdateCameraDisplay();
+}
+
+// Update the display for the current camera tab
+void CSpoutCamProperties::UpdateCameraDisplay()
+{
+	// Load settings for the current camera tab
+	LoadCameraSettings(g_currentCameraTab);
+	
+	// Force refresh of all controls to fix rendering issues
+	RefreshControlsDisplay();
+}
+
+// Save current camera settings (per-tab settings)
+void CSpoutCamProperties::SaveCurrentCameraSettings()
+{
+	// Save current control values to registry with camera-specific keys
+	DWORD dwFps, dwResolution, dwMirror, dwSwap, dwFlip;
+	wchar_t wname[256];
+	char name[256];
+	char keyName[256];
+
+	// Create camera-specific registry key
+	sprintf_s(keyName, "SpoutCam%d", g_currentCameraTab + 1);
+
+	HWND hwndCtl = GetDlgItem(this->m_Dlg, IDC_FPS);
+	dwFps = ComboBox_GetCurSel(hwndCtl);
+	sprintf_s(name, "Software\\Leading Edge\\%s", keyName);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "fps", dwFps);
+
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_RESOLUTION);
+	dwResolution = ComboBox_GetCurSel(hwndCtl);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "resolution", dwResolution);
+
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_NAME);
+	Edit_GetText(hwndCtl, wname, 256);
+	WideCharToMultiByte(CP_ACP, 0, wname, -1, name, 256, NULL, NULL);
+	sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+	WritePathToRegistry(HKEY_CURRENT_USER, keyName, "senderstart", name);
+
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_MIRROR);
+	dwMirror = Button_GetCheck(hwndCtl);
+	sprintf_s(name, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "mirror", dwMirror);
+
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_SWAP);
+	dwSwap = Button_GetCheck(hwndCtl);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "swap", dwSwap);
+
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_FLIP);
+	dwFlip = Button_GetCheck(hwndCtl);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "flip", dwFlip);
+}
+
+// Load settings for a specific camera tab
+void CSpoutCamProperties::LoadCameraSettings(int cameraIndex)
+{
+	DWORD dwValue;
+	char name[256];
+	wchar_t wname[256];
+	HWND hwndCtl;
+	char keyName[256];
+
+	// Create camera-specific registry key
+	sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
+
+	// Load FPS - use sender-based defaults if no saved settings
+	DWORD defaultFps, defaultResolution;
+	GetActiveSenderDefaults(&defaultFps, &defaultResolution);
+	
+	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "fps", &dwValue) || dwValue > 5) {
+		dwValue = defaultFps; // Use sender-based default
+	}
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_FPS);
+	ComboBox_SetCurSel(hwndCtl, dwValue);
+
+	// Load Resolution - use sender-based defaults if no saved settings
+	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "resolution", &dwValue) || dwValue > 10) {
+		dwValue = defaultResolution; // Use sender-based default
+	}
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_RESOLUTION);
+	ComboBox_SetCurSel(hwndCtl, dwValue);
+
+	// Load sender name
+	if (!ReadPathFromRegistry(HKEY_CURRENT_USER, keyName, "senderstart", name)) {
+		name[0] = 0;
+	}
+	if (name[0] != 0) {
+		size_t convertedChars = 0;
+		mbstowcs_s(&convertedChars, wname, 256, name, 256);
+	} else {
+		wname[0] = 0;
+	}
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_NAME);
+	Edit_SetText(hwndCtl, wname);
+
+	// Load mirror
+	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "mirror", &dwValue)) {
+		dwValue = 0;
+	}
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_MIRROR);
+	Button_SetCheck(hwndCtl, dwValue);
+
+	// Load swap
+	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "swap", &dwValue)) {
+		dwValue = 0;
+	}
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_SWAP);
+	Button_SetCheck(hwndCtl, dwValue);
+
+	// Load flip
+	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "flip", &dwValue)) {
+		dwValue = 0;
+	}
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_FLIP);
+	Button_SetCheck(hwndCtl, dwValue);
+
+	// Refresh sender list for this camera
+	RefreshSenderList();
+}
+
+// Apply real-time settings changes (mirror, flip, swap) immediately
+void CSpoutCamProperties::ApplyRealTimeSettings()
+{
+	DWORD dwMirror, dwSwap, dwFlip;
+	char keyName[256];
+	char name[256];
+	wchar_t wname[256];
+
+	// Create camera-specific registry key for current tab
+	sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+
+	// Get current control values
+	HWND hwndCtl = GetDlgItem(this->m_Dlg, IDC_MIRROR);
+	dwMirror = Button_GetCheck(hwndCtl);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "mirror", dwMirror);
+
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_SWAP);
+	dwSwap = Button_GetCheck(hwndCtl);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "swap", dwSwap);
+
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_FLIP);
+	dwFlip = Button_GetCheck(hwndCtl);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "flip", dwFlip);
+
+	// Get current fps, resolution, and sender name for complete settings update
+	DWORD dwFps = ComboBox_GetCurSel(GetDlgItem(this->m_Dlg, IDC_FPS));
+	DWORD dwResolution = ComboBox_GetCurSel(GetDlgItem(this->m_Dlg, IDC_RESOLUTION));
+	
+	hwndCtl = GetDlgItem(this->m_Dlg, IDC_NAME);
+	Edit_GetText(hwndCtl, wname, 256);
+	WideCharToMultiByte(CP_ACP, 0, wname, -1, name, 256, NULL, NULL);
+
+	// Apply settings to the camera filter for immediate effect
+	if (m_pCamSettings) {
+		m_pCamSettings->put_Settings(dwFps, dwResolution, dwMirror, dwSwap, dwFlip, name);
+	}
+}
+
+// Refresh all controls display to fix rendering issues when switching tabs
+void CSpoutCamProperties::RefreshControlsDisplay()
+{
+	// List of all control IDs that need refreshing
+	int controlIds[] = {
+		IDC_FPS, IDC_RESOLUTION, IDC_SENDER_LIST, IDC_REFRESH,
+		IDC_NAME, IDC_MIRROR, IDC_FLIP, IDC_SWAP,
+		IDC_REGISTER, IDC_UNREGISTER, IDC_REMOVE_CAMERA
+	};
+
+	// Force redraw of all controls
+	for (int i = 0; i < sizeof(controlIds) / sizeof(int); i++) {
+		HWND hwndCtl = GetDlgItem(this->m_Dlg, controlIds[i]);
+		if (hwndCtl) {
+			InvalidateRect(hwndCtl, NULL, TRUE);
+			UpdateWindow(hwndCtl);
+		}
+	}
+
+	// Also refresh the dialog itself
+	InvalidateRect(this->m_Dlg, NULL, TRUE);
+	UpdateWindow(this->m_Dlg);
+}
+
+// Automatically reregister the current camera after FPS/resolution changes
+void CSpoutCamProperties::AutoReregisterCamera()
+{
+	// First unregister the current camera
+	HRESULT hr = RegisterSingleCameraFilter(FALSE, g_currentCameraTab);
+	if (FAILED(hr)) {
+		if (!m_bSilent) {
+			wchar_t errorMsg[256];
+			swprintf_s(errorMsg, L"Failed to unregister SpoutCam%d during reregistration.\nYou may need to manually unregister and register the camera.", g_currentCameraTab + 1);
+			MessageBox(m_Dlg, errorMsg, L"Reregistration Warning", MB_OK | MB_ICONWARNING);
+		}
+		return;
+	}
+
+	// Small delay to ensure clean unregistration
+	Sleep(100);
+
+	// Re-register the camera with new settings
+	hr = RegisterSingleCameraFilter(TRUE, g_currentCameraTab);
+	if (SUCCEEDED(hr)) {
+		if (!m_bSilent) {
+			wchar_t successMsg[256];
+			swprintf_s(successMsg, L"SpoutCam%d has been successfully reregistered with new settings.\nThe camera is now ready to use with updated resolution/FPS.", g_currentCameraTab + 1);
+			MessageBox(m_Dlg, successMsg, L"Reregistration Complete", MB_OK | MB_ICONINFORMATION);
+		}
+	} else {
+		if (!m_bSilent) {
+			wchar_t errorMsg[256];
+			swprintf_s(errorMsg, L"Failed to reregister SpoutCam%d.\nPlease manually register the camera using the 'Register This Camera' button.", g_currentCameraTab + 1);
+			MessageBox(m_Dlg, errorMsg, L"Reregistration Error", MB_OK | MB_ICONERROR);
+		}
+	}
+}
+
+// Get default FPS and resolution based on active sender properties
+void CSpoutCamProperties::GetActiveSenderDefaults(DWORD* pDefaultFps, DWORD* pDefaultResolution)
+{
+	if (!pDefaultFps || !pDefaultResolution) return;
+	
+	// Set fallback defaults
+	*pDefaultFps = 3; // 30 FPS
+	*pDefaultResolution = 0; // Active sender
+	
+	// Create a temporary SpoutDX receiver instance to query active sender
+	spoutDX spoutReceiver;
+	char senderName[256];
+	unsigned int senderWidth = 0, senderHeight = 0;
+	
+	// Try to get active sender information
+	if (spoutReceiver.GetActiveSender(senderName)) {
+		HANDLE dxShareHandle = NULL;
+		DWORD dwFormat = 0;
+		if (spoutReceiver.GetSenderInfo(senderName, senderWidth, senderHeight, dxShareHandle, dwFormat)) {
+			// Map sender resolution to our resolution index
+			if (senderWidth == 320 && senderHeight == 240) *pDefaultResolution = 1;
+			else if (senderWidth == 640 && senderHeight == 360) *pDefaultResolution = 2;
+			else if (senderWidth == 640 && senderHeight == 480) *pDefaultResolution = 3;
+			else if (senderWidth == 800 && senderHeight == 600) *pDefaultResolution = 4;
+			else if (senderWidth == 1024 && senderHeight == 720) *pDefaultResolution = 5;
+			else if (senderWidth == 1024 && senderHeight == 768) *pDefaultResolution = 6;
+			else if (senderWidth == 1280 && senderHeight == 720) *pDefaultResolution = 7;
+			else if (senderWidth == 1280 && senderHeight == 960) *pDefaultResolution = 8;
+			else if (senderWidth == 1280 && senderHeight == 1024) *pDefaultResolution = 9;
+			else if (senderWidth == 1920 && senderHeight == 1080) *pDefaultResolution = 10;
+			else *pDefaultResolution = 0; // Use active sender size
+			
+			// For FPS, we could estimate based on resolution:
+			// Higher resolutions typically need lower FPS for smooth performance
+			if (senderWidth >= 1920 && senderHeight >= 1080) {
+				*pDefaultFps = 3; // 30 FPS for 1080p+
+			} else if (senderWidth >= 1280 && senderHeight >= 720) {
+				*pDefaultFps = 3; // 30 FPS for 720p+
+			} else {
+				*pDefaultFps = 5; // 60 FPS for smaller resolutions
+			}
+		}
 	}
 }

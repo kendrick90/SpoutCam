@@ -31,6 +31,7 @@
 
 STDAPI AMovieSetupRegisterServer( CLSID clsServer, LPCWSTR szDescription, LPCWSTR szFileName, LPCWSTR szThreadingModel = L"Both", LPCWSTR szServerType = L"InprocServer32" );
 STDAPI AMovieSetupUnregisterServer( CLSID clsServer );
+HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex );
 
 //
 // The NAME OF THE CAMERA CAN BE CHANGED HERE
@@ -186,7 +187,7 @@ STDAPI RegisterFilters( BOOL bRegister )
     WCHAR achFileName[MAX_PATH];
 	
 	//<==================== VS-START ====================>
-	if (0 == GetModuleFileNameW(g_hInst, achFileName, sizeof(achFileName)))
+	if (0 == GetModuleFileNameW(g_hInst, achFileName, MAX_PATH))
 	{
 		return AmHresultFromWin32(GetLastError());
 	}
@@ -237,12 +238,104 @@ STDAPI RegisterFilters( BOOL bRegister )
           fm->Release();
     }
 
+    return RegisterSingleCameraFilter(bRegister, -1); // Register all cameras (legacy behavior)
+}
+
+HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
+{
+	ASSERT(g_hInst != 0);
+
+    HRESULT hr = NOERROR;
+    WCHAR achFileName[MAX_PATH];
+	
+	//<==================== VS-START ====================>
+	if (0 == GetModuleFileNameW(g_hInst, achFileName, MAX_PATH))
+	{
+		return AmHresultFromWin32(GetLastError());
+	}
+	//<==================== VS-END ======================>
+
+    hr = CoInitialize(0);
+    if(bRegister)
+    {
+        if (cameraIndex >= 0 && cameraIndex < MAX_SPOUT_CAMERAS) {
+            // Register single camera and its property page
+            hr = AMovieSetupRegisterServer(g_CameraConfigs[cameraIndex].clsid, CameraNames[cameraIndex], achFileName, L"Both", L"InprocServer32");
+            if (SUCCEEDED(hr)) {
+                hr = AMovieSetupRegisterServer(g_CameraConfigs[cameraIndex].propPageClsid, L"Settings", achFileName, L"Both", L"InprocServer32");
+            }
+        } else {
+            // Register all cameras and their property pages
+            for (int i = 0; i < MAX_SPOUT_CAMERAS && SUCCEEDED(hr); i++) {
+                hr = AMovieSetupRegisterServer(g_CameraConfigs[i].clsid, CameraNames[i], achFileName, L"Both", L"InprocServer32");
+                if (SUCCEEDED(hr)) {
+                    hr = AMovieSetupRegisterServer(g_CameraConfigs[i].propPageClsid, L"Settings", achFileName, L"Both", L"InprocServer32");
+                }
+            }
+        }
+    }
+
+    if( SUCCEEDED(hr) )
+    {
+        IFilterMapper2 *fm = 0;
+        hr = CreateComObject( CLSID_FilterMapper2, IID_IFilterMapper2, fm );
+        if( SUCCEEDED(hr) )
+        {
+            if(bRegister)
+            {
+                if (cameraIndex >= 0 && cameraIndex < MAX_SPOUT_CAMERAS) {
+                    // Register single camera as a video input device
+                    IMoniker *pMoniker = 0;
+                    REGFILTER2 rf2;
+                    rf2.dwVersion = 1;
+                    rf2.dwMerit = MERIT_DO_NOT_USE;
+                    rf2.cPins = 1;
+                    rf2.rgPins = &AMSPinVCam;
+                    hr = fm->RegisterFilter(g_CameraConfigs[cameraIndex].clsid, CameraNames[cameraIndex], &pMoniker, &CLSID_VideoInputDeviceCategory, NULL, &rf2);
+                } else {
+                    // Register each camera as a video input device
+                    for (int i = 0; i < MAX_SPOUT_CAMERAS && SUCCEEDED(hr); i++) {
+                        IMoniker *pMoniker = 0;
+                        REGFILTER2 rf2;
+                        rf2.dwVersion = 1;
+                        rf2.dwMerit = MERIT_DO_NOT_USE;
+                        rf2.cPins = 1;
+                        rf2.rgPins = &AMSPinVCam;
+                        hr = fm->RegisterFilter(g_CameraConfigs[i].clsid, CameraNames[i], &pMoniker, &CLSID_VideoInputDeviceCategory, NULL, &rf2);
+                    }
+                }
+            }
+            else
+            {
+                if (cameraIndex >= 0 && cameraIndex < MAX_SPOUT_CAMERAS) {
+                    // Unregister single camera
+                    fm->UnregisterFilter(&CLSID_VideoInputDeviceCategory, 0, g_CameraConfigs[cameraIndex].clsid);
+                } else {
+                    // Unregister each camera
+                    for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {
+                        fm->UnregisterFilter(&CLSID_VideoInputDeviceCategory, 0, g_CameraConfigs[i].clsid);
+                    }
+                }
+            }
+        }
+
+      // release interface
+      if(fm)
+          fm->Release();
+    }
+
 	if (SUCCEEDED(hr) && !bRegister)
 	{
-        // Unregister all cameras and property pages
-        for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {
-            AMovieSetupUnregisterServer(g_CameraConfigs[i].clsid);
-            AMovieSetupUnregisterServer(g_CameraConfigs[i].propPageClsid);
+        if (cameraIndex >= 0 && cameraIndex < MAX_SPOUT_CAMERAS) {
+            // Unregister single camera and property page
+            AMovieSetupUnregisterServer(g_CameraConfigs[cameraIndex].clsid);
+            AMovieSetupUnregisterServer(g_CameraConfigs[cameraIndex].propPageClsid);
+        } else {
+            // Unregister all cameras and property pages
+            for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {
+                AMovieSetupUnregisterServer(g_CameraConfigs[i].clsid);
+                AMovieSetupUnregisterServer(g_CameraConfigs[i].propPageClsid);
+            }
         }
 	}
 
@@ -255,12 +348,25 @@ STDAPI RegisterFilters( BOOL bRegister )
 // see http://msdn.microsoft.com/en-us/library/windows/desktop/dd376682%28v=vs.85%29.aspx
 STDAPI DllRegisterServer()
 {
-	return RegisterFilters(TRUE);
+	// Register only the first camera by default for backward compatibility
+	// Additional cameras can be registered individually through the properties dialog
+	return RegisterSingleCameraFilter(TRUE, 0);
 }
 
 STDAPI DllUnregisterServer()
 {
 	return RegisterFilters(FALSE);
+}
+
+// External functions for single camera registration
+extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE RegisterSingleSpoutCamera(int cameraIndex)
+{
+    return RegisterSingleCameraFilter(TRUE, cameraIndex);
+}
+
+extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE UnregisterSingleSpoutCamera(int cameraIndex)
+{
+    return RegisterSingleCameraFilter(FALSE, cameraIndex);
 }
 
 //<==================== VS-START ====================>

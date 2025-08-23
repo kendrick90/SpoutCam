@@ -25,4 +25,8 @@
 #define IDC_REFRESH                             419
 #define IDC_REGISTER                            420
 #define IDC_UNREGISTER                          421
+#define IDC_UNREGISTER_ALL                      422
+#define IDC_ADD_CAMERA                          423
+#define IDC_REMOVE_CAMERA                       424
+#define IDC_CAMERA_TABS                         425
 #define IDS_TITLE                               1015

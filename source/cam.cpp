@@ -793,7 +793,7 @@ void CVCamStream::SetFps(DWORD dwFps)
 			g_FrameTime = 400000; // 25
 			break;
 		case 3 :
-			g_FrameTime = 333333; // 30
+			g_FrameTime = 333333; // 30 (10000000/30 = 333333.33)
 			break;
 		case 4 :
 			g_FrameTime = 200000; // 50

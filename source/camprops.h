@@ -1,5 +1,8 @@
 #include <dshow.h>
 
+// Forward declaration for single camera registration function
+HRESULT RegisterSingleCameraFilter(BOOL bRegister, int cameraIndex);
+
 class CSpoutCamProperties : public CBasePropertyPage
 {
 
@@ -32,5 +35,20 @@ private:
 	// Camera registration methods
 	void RegisterCameras();
 	void UnregisterCameras();
+	void RegisterSingleCamera(int cameraIndex);
+	void UnregisterSingleCamera(int cameraIndex);
+	
+	// Tab control methods for multi-camera management
+	void InitializeTabControl();
+	void AddCameraTab();
+	void RemoveCameraTab();
+	void OnTabSelectionChange();
+	void UpdateCameraDisplay();
+	void SaveCurrentCameraSettings();
+	void LoadCameraSettings(int cameraIndex);
+	void ApplyRealTimeSettings();
+	void RefreshControlsDisplay();
+	void AutoReregisterCamera();
+	void GetActiveSenderDefaults(DWORD* pDefaultFps, DWORD* pDefaultResolution);
 };
 
