@@ -485,12 +485,24 @@ void CSpoutCamProperties::PopulateAvailableSenders()
 	// Add "Auto" option (use active sender)
 	ComboBox_AddString(hwndSenderList, L"Auto (Active Sender)");
 	
-	// TODO: Use Spout SDK to enumerate available senders
-	// For now, add some placeholder entries
-	ComboBox_AddString(hwndSenderList, L"Sender1");
-	ComboBox_AddString(hwndSenderList, L"Sender2");
-	ComboBox_AddString(hwndSenderList, L"OBS");
-	ComboBox_AddString(hwndSenderList, L"Resolume");
+	// Create a temporary SpoutDX receiver instance for enumeration
+	spoutDX spoutReceiver;
+	
+	// Get the number of available senders
+	int senderCount = spoutReceiver.GetSenderCount();
+	
+	if (senderCount > 0) {
+		// Enumerate all available senders
+		for (int i = 0; i < senderCount; i++) {
+			char senderName[256] = {0};
+			if (spoutReceiver.GetSender(i, senderName, 256)) {
+				// Convert to wide string for the combo box
+				WCHAR wideSenderName[256];
+				MultiByteToWideChar(CP_ACP, 0, senderName, -1, wideSenderName, 256);
+				ComboBox_AddString(hwndSenderList, wideSenderName);
+			}
+		}
+	}
 	
 	// Select "Auto" by default
 	ComboBox_SetCurSel(hwndSenderList, 0);
