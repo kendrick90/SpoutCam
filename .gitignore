@@ -82,3 +82,4 @@ nul
 *.vcxproj.filters
 *.VC.db
 *.VC.opendb
+/.claude
