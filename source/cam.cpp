@@ -345,6 +345,12 @@ static uint32_t xorshiftRand()
 //////////////////////////////////////////////////////////////////////////
 CUnknown * WINAPI CVCam::CreateInstance(LPUNKNOWN lpunk, HRESULT *phr)
 {
+    // This is the default instance - use camera 0
+    return CreateCameraInstance(lpunk, phr, 0);
+}
+
+CUnknown * WINAPI CVCam::CreateCameraInstance(LPUNKNOWN lpunk, HRESULT *phr, int cameraIndex)
+{
     ASSERT(phr);
 
 	// Console window
@@ -356,21 +362,71 @@ CUnknown * WINAPI CVCam::CreateInstance(LPUNKNOWN lpunk, HRESULT *phr)
 	// For clear options dialog for scaled display
 	SetProcessDPIAware();
 
-    CUnknown *punk = new CVCam(lpunk, phr);
+    CUnknown *punk = new CVCam(lpunk, phr, cameraIndex);
 
     return punk;
+}
+
+// Factory functions for each camera
+CUnknown * WINAPI CreateCamera0(LPUNKNOWN lpunk, HRESULT *phr) {
+    return CVCam::CreateCameraInstance(lpunk, phr, 0);
+}
+
+CUnknown * WINAPI CreateCamera1(LPUNKNOWN lpunk, HRESULT *phr) {
+    return CVCam::CreateCameraInstance(lpunk, phr, 1);
+}
+
+CUnknown * WINAPI CreateCamera2(LPUNKNOWN lpunk, HRESULT *phr) {
+    return CVCam::CreateCameraInstance(lpunk, phr, 2);
+}
+
+CUnknown * WINAPI CreateCamera3(LPUNKNOWN lpunk, HRESULT *phr) {
+    return CVCam::CreateCameraInstance(lpunk, phr, 3);
+}
+
+// Helper method to find camera configuration by CLSID
+int CVCam::FindCameraConfig(REFCLSID clsid) {
+    for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {
+        if (IsEqualGUID(clsid, g_CameraConfigs[i].clsid)) {
+            return i;
+        }
+    }
+    return 0; // Default to first camera if not found
 }
 
 CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr) : 
 	CSource(NAME(SPOUTCAMNAME), lpunk, CLSID_SpoutCam) //VS: replaced SpoutCamName with makro SPOUTCAMNAME, NAME() expects LPCTSTR
 {
+    // Default constructor - use camera 0
+    m_cameraIndex = 0;
+    
     ASSERT(phr);
-
     CAutoLock cAutoLock(&m_cStateLock);
     
-	// Create the one and only output pin
+    // Create the one and only output pin using the first camera name
+    WCHAR wideCameraName[64];
+    MultiByteToWideChar(CP_ACP, 0, g_CameraConfigs[0].name, -1, wideCameraName, 64);
+    
     m_paStreams = (CSourceStream **)new CVCamStream*[1];
-	m_paStreams[0] = new CVCamStream(phr, this, (LPCWSTR)&SpoutCamName);
+	m_paStreams[0] = new CVCamStream(phr, this, wideCameraName, 0);
+
+	if (phr) *phr = S_OK; //VS
+}
+
+CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr, int cameraIndex) : 
+	CSource(NAME(SPOUTCAMNAME), lpunk, g_CameraConfigs[cameraIndex].clsid)
+{
+    m_cameraIndex = cameraIndex;
+    
+    ASSERT(phr);
+    CAutoLock cAutoLock(&m_cStateLock);
+    
+    // Create the one and only output pin using the specified camera name
+    WCHAR wideCameraName[64];
+    MultiByteToWideChar(CP_ACP, 0, g_CameraConfigs[cameraIndex].name, -1, wideCameraName, 64);
+    
+    m_paStreams = (CSourceStream **)new CVCamStream*[1];
+	m_paStreams[0] = new CVCamStream(phr, this, wideCameraName, cameraIndex);
 
 	if (phr) *phr = S_OK; //VS
 }
@@ -574,8 +630,8 @@ HRESULT CVCamStream::put_Settings(DWORD dwFps, DWORD dwResolution, DWORD dwMirro
 // CVCamStream is the one and only output pin of CVCam which handles 
 // all the stuff.
 //////////////////////////////////////////////////////////////////////////
-CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
-	CSourceStream(NAME(SPOUTCAMNAME), phr, pParent, pPinName), m_pParent(pParent) //VS: replaced SpoutCamName with makro SPOUTCAMNAME, NAME() expects LPCTSTR
+CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName, int cameraIndex) :
+	CSourceStream(NAME(SPOUTCAMNAME), phr, pParent, pPinName), m_pParent(pParent), m_cameraIndex(cameraIndex) //VS: replaced SpoutCamName with makro SPOUTCAMNAME, NAME() expects LPCTSTR
 {
 	bDXinitialized  = false; // DirectX
 	bMemoryMode		= false; // Default mode is texture, true means memoryshare
@@ -617,6 +673,7 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 
 	//
 	// Retrieve fps and resolution from registry "SpoutCamSettings"
+	// Each camera uses its own registry subkey for independent settings
 	//		o Fps
 	//			10	0
 	//			15	1
@@ -626,8 +683,16 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 	//			50	4
 	//			60	5
 	//
+	
+	// Create camera-specific registry path
+	if (m_cameraIndex == 0) {
+		strcpy_s(m_registryPath, 256, "Software\\Leading Edge\\SpoutCam");
+	} else {
+		sprintf_s(m_registryPath, 256, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
+	}
+	
 	// Fps from SpoutCamSettings (default 3 = 30)
-	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "fps", &dwFps)) {
+	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, m_registryPath, "fps", &dwFps)) {
 		dwFps = 3;
 	}
 
@@ -645,7 +710,7 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 	//			1920 x 1080		10
 	//
 	// Resolution from SpoutCamSettings (default 0 = active sender)
-	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "resolution", &dwResolution))
+	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, m_registryPath, "resolution", &dwResolution))
 	{
 		dwResolution = 0;
 	}
@@ -660,18 +725,18 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 
 	// Mirror image
 	DWORD dwMirror = 0;
-	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "mirror", &dwMirror);
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, m_registryPath, "mirror", &dwMirror);
 
 	// RGB <> BGR
 	DWORD dwSwap = 0;
-	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "swap", &dwSwap);
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, m_registryPath, "swap", &dwSwap);
 
 	// Flip image
 	// Default is flipped due to upside down Windows bitmap
 	// If set false, the result comes out inverted
 	// bInvert = false; 
 	DWORD dwFlip = 0;
-	ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "flip", &dwFlip);
+	ReadDwordFromRegistry(HKEY_CURRENT_USER, m_registryPath, "flip", &dwFlip);
 
 	//
 	// Lock to a specific sender
@@ -681,9 +746,10 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName) :
 	// SpoutCam can be started before or after the sender.
 	// See SpoutCamSettings to specify the starting sender name.
 	// A starting name flags waiting for the nominated sender.
+	// Each camera can have its own default sender.
 	//
 	g_SenderStart[0] = 0;
-	ReadPathFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "senderstart", g_SenderStart);
+	ReadPathFromRegistry(HKEY_CURRENT_USER, m_registryPath, "senderstart", g_SenderStart);
 
 	/*
 	printf("dwFps        = %d\n", dwFps);
@@ -1001,7 +1067,7 @@ HRESULT CVCamStream::FillBuffer(IMediaSample *pms)
 				// ReceiveImage uses resampling for a different texture size
 				strcpy_s(g_SenderName, 256, receiver.GetSenderName());
 				// Set the sender name to the registry for SpoutCamSettings
-				WritePathToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "sendername", g_SenderName);
+				WritePathToRegistry(HKEY_CURRENT_USER, m_registryPath, "sendername", g_SenderName);
 			}
 		}
 		bInitialized = true;

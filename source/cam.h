@@ -38,6 +38,19 @@
 // we need a LPCTSTR for the NAME() makros in debug mode
 #define SPOUTCAMNAME "SpoutCam"
 
+// Multiple camera support - configure how many cameras you want (1-8)
+#define MAX_SPOUT_CAMERAS 4
+
+// Structure to hold camera configuration
+struct SpoutCamConfig {
+    const char* name;
+    GUID clsid;
+    GUID propPageClsid;
+};
+
+// Camera configurations array - each camera needs unique CLSID and name
+extern SpoutCamConfig g_CameraConfigs[MAX_SPOUT_CAMERAS];
+
 extern "C" {
 	DECLARE_INTERFACE_(ICamSettings, IUnknown)
 	{
@@ -64,11 +77,19 @@ class CVCam : public CSource,
 	public ISpecifyPropertyPages,//VS
 	public ICamSettings//VS
 {
+private:
+    int m_cameraIndex; // Index into g_CameraConfigs array
+    
 public:
+    // Helper method to find camera configuration by CLSID
+    int FindCameraConfig(REFCLSID clsid);
+    const SpoutCamConfig* GetCameraConfig() const { return &g_CameraConfigs[m_cameraIndex]; }
     //////////////////////////////////////////////////////////////////////////
     //  IUnknown
     //////////////////////////////////////////////////////////////////////////
     static CUnknown * WINAPI CreateInstance(LPUNKNOWN lpunk, HRESULT *phr);
+    // Template method that creates instance for specific camera index
+    static CUnknown * WINAPI CreateCameraInstance(LPUNKNOWN lpunk, HRESULT *phr, int cameraIndex);
     STDMETHODIMP QueryInterface(REFIID riid, void **ppv);
 
 	// LJ additons
@@ -89,6 +110,7 @@ public:
 private:
 
     CVCam(LPUNKNOWN lpunk, HRESULT *phr);
+    CVCam(LPUNKNOWN lpunk, HRESULT *phr, int cameraIndex); // Constructor with camera index
 
 /////////////////////////////////////
 // all inherited virtual functions //
@@ -124,6 +146,9 @@ public:
 
 class CVCamStream : public CSourceStream, public IAMStreamConfig, public IKsPropertySet, public IAMDroppedFrames
 {
+private:
+    int m_cameraIndex; // Index of which camera this stream belongs to
+    char m_registryPath[256]; // Camera-specific registry path
 
 public:
 
@@ -187,7 +212,7 @@ public:
 	//////////////////////////////////////////////////////////////////////////
     //  CSourceStream
     //////////////////////////////////////////////////////////////////////////
-    CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName);
+    CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName, int cameraIndex = 0);
     ~CVCamStream();
 
     HRESULT FillBuffer(IMediaSample *pms);
