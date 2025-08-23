@@ -13,7 +13,7 @@
 // to be the same as the current SpoutCamSettings dialog
 //
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
-IDD_SPOUTCAMBOX DIALOG 0, 0, 200, 220
+IDD_SPOUTCAMBOX DIALOG 0, 0, 200, 250
 STYLE DS_CENTER | DS_SHELLFONT | WS_CHILD
 FONT 8, "Ms Shell Dlg"
 {
@@ -39,11 +39,15 @@ FONT 8, "Ms Shell Dlg"
 	AUTOCHECKBOX    "Flip", IDC_FLIP, 62, 151, 36, 8, 0, WS_EX_LEFT
 	AUTOCHECKBOX    "Swap RGB/BGR", IDC_SWAP, 104, 151, 60, 8, 0, WS_EX_LEFT
 
-	LTEXT           "", IDC_VERS, 15, 180, 42, 9, SS_LEFT, WS_EX_LEFT
-	CONTROL         "", IDC_SPOUT_URL, WC_BUTTON, BS_OWNERDRAW | BS_FLAT, 65, 180, 60, 10, WS_EX_TRANSPARENT
-	AUTOCHECKBOX    "Disable warnings", IDC_SILENT, 15, 195, 65, 8, 0, WS_EX_LEFT
+	GROUPBOX        "Camera Registration", -1, 10, 172, 180, 35, 0, WS_EX_LEFT
+	PUSHBUTTON      "Register Cameras", IDC_REGISTER, 20, 185, 70, 14, 0, WS_EX_LEFT
+	PUSHBUTTON      "Unregister Cameras", IDC_UNREGISTER, 110, 185, 70, 14, 0, WS_EX_LEFT
+
+	LTEXT           "", IDC_VERS, 15, 215, 42, 9, SS_LEFT, WS_EX_LEFT
+	CONTROL         "", IDC_SPOUT_URL, WC_BUTTON, BS_OWNERDRAW | BS_FLAT, 65, 215, 60, 10, WS_EX_TRANSPARENT
+	AUTOCHECKBOX    "Disable warnings", IDC_SILENT, 15, 230, 65, 8, 0, WS_EX_LEFT
 	
-	LTEXT           "Note: Each camera can connect to a different Spout sender", -1, 15, 205, 170, 8, SS_LEFT, WS_EX_LEFT
+	LTEXT           "Note: Each camera can connect to a different Spout sender", -1, 85, 230, 105, 8, SS_LEFT, WS_EX_LEFT
 
 }
 

@@ -23,4 +23,6 @@
 #define IDC_CAMERA_NAME                         417
 #define IDC_SENDER_LIST                         418
 #define IDC_REFRESH                             419
+#define IDC_REGISTER                            420
+#define IDC_UNREGISTER                          421
 #define IDS_TITLE                               1015

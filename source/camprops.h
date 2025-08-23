@@ -28,5 +28,9 @@ private:
 	void PopulateAvailableSenders();
 	HRESULT GetCameraIndex(int* pCameraIndex);
 	void SetRegistryPath(char* registryPath, int cameraIndex);
+	
+	// Camera registration methods
+	void RegisterCameras();
+	void UnregisterCameras();
 };
 

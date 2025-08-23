@@ -114,6 +114,16 @@ INT_PTR CSpoutCamProperties::OnReceiveMessage(HWND hwnd, UINT uMsg, WPARAM wPara
 					RefreshSenderList();
 					break;
 
+				case IDC_REGISTER:
+					// Register all SpoutCam cameras
+					RegisterCameras();
+					break;
+
+				case IDC_UNREGISTER:
+					// Unregister all SpoutCam cameras
+					UnregisterCameras();
+					break;
+
 				case IDC_SENDER_LIST:
 					// Handle sender selection change
 					if (HIWORD(wParam) == CBN_SELCHANGE) {
@@ -512,4 +522,33 @@ void CSpoutCamProperties::PopulateAvailableSenders()
 void CSpoutCamProperties::RefreshSenderList()
 {
 	PopulateAvailableSenders();
+}
+
+// External function from dll.cpp
+extern "C" STDAPI RegisterFilters(BOOL bRegister);
+
+// Register all SpoutCam cameras
+void CSpoutCamProperties::RegisterCameras()
+{
+	HRESULT hr = RegisterFilters(TRUE);
+	if (SUCCEEDED(hr)) {
+		if (!m_bSilent) {
+			MessageBox(m_Dlg, L"SpoutCam cameras registered successfully!", L"Registration", MB_OK | MB_ICONINFORMATION);
+		}
+	} else {
+		MessageBox(m_Dlg, L"Failed to register SpoutCam cameras.\n\nThis may require administrator privileges.", L"Registration Error", MB_OK | MB_ICONERROR);
+	}
+}
+
+// Unregister all SpoutCam cameras
+void CSpoutCamProperties::UnregisterCameras()
+{
+	HRESULT hr = RegisterFilters(FALSE);
+	if (SUCCEEDED(hr)) {
+		if (!m_bSilent) {
+			MessageBox(m_Dlg, L"SpoutCam cameras unregistered successfully!", L"Unregistration", MB_OK | MB_ICONINFORMATION);
+		}
+	} else {
+		MessageBox(m_Dlg, L"Failed to unregister SpoutCam cameras.\n\nThis may require administrator privileges.", L"Unregistration Error", MB_OK | MB_ICONERROR);
+	}
 }
