@@ -20,4 +20,7 @@
 #define IDC_SPOUT_URL                           414						
 #define IDC_VERS                                415
 #define IDC_SILENT                              416
+#define IDC_CAMERA_NAME                         417
+#define IDC_SENDER_LIST                         418
+#define IDC_REFRESH                             419
 #define IDS_TITLE                               1015

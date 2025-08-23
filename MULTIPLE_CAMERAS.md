@@ -43,12 +43,46 @@ This allows each camera to have independent settings for:
 - **senderstart** - Lock to specific sender name
 - **sendername** - Currently active sender (auto-saved)
 
+## Enhanced Configuration UI
+
+Each virtual camera now has an **improved settings dialog** with:
+
+### 🎛️ **New UI Features:**
+- **Camera Identification** - Shows which camera you're configuring (SpoutCam, SpoutCam2, etc.)
+- **Available Senders List** - Dropdown showing currently running Spout senders
+- **Refresh Button** - Update the senders list in real-time
+- **Source Selection** - Choose different senders for each camera:
+  - **Auto (Active Sender)** - Use the currently active sender
+  - **Specific Sender** - Lock to a particular sender by name
+  - **Custom Name** - Type any sender name manually
+
+### 📋 **Settings Dialog Layout:**
+```
+Camera Configuration
+┌─────────────────────────────────┐
+│ Configuring: SpoutCam2          │
+├─────────────┬───────────────────┤
+│ Frame Rate  │ Starting Resolution│
+├─────────────┴───────────────────┤
+│ Available Senders: [Dropdown ▼] │
+│ Custom Sender Name: [Text Box ] │
+├─────────────────────────────────┤
+│ ☐ Mirror  ☐ Flip  ☐ Swap RGB/BGR│
+└─────────────────────────────────┘
+```
+
 ## Usage Examples
 
 1. **OBS Studio**: All cameras appear in the Video Capture Device source dropdown
-2. **Zoom/Teams**: Each camera shows up as a separate webcam option
+2. **Zoom/Teams**: Each camera shows up as a separate webcam option  
 3. **Streaming Software**: Use different cameras for different scenes/overlays
 4. **Multi-camera Setups**: Route different Spout senders to different applications
+
+### 🎬 **Multi-Source Workflow:**
+1. **Right-click each SpoutCam** in your video application → Properties
+2. **Select different senders** for each camera in the settings dialog
+3. **Click Refresh** to see newly started Spout applications  
+4. **Use "Auto"** for dynamic switching or **specific names** for fixed routing
 
 ## Technical Details
 

@@ -109,6 +109,29 @@ INT_PTR CSpoutCamProperties::OnReceiveMessage(HWND hwnd, UINT uMsg, WPARAM wPara
 						m_bSilent = FALSE;
 					break;
 
+				case IDC_REFRESH:
+					// Refresh the available senders list
+					RefreshSenderList();
+					break;
+
+				case IDC_SENDER_LIST:
+					// Handle sender selection change
+					if (HIWORD(wParam) == CBN_SELCHANGE) {
+						HWND hwndSenderList = GetDlgItem(hwnd, IDC_SENDER_LIST);
+						int selectedIndex = ComboBox_GetCurSel(hwndSenderList);
+						
+						if (selectedIndex > 0) { // Not "Auto"
+							// Get the selected sender name and put it in the custom name field
+							WCHAR senderName[256];
+							ComboBox_GetLBText(hwndSenderList, selectedIndex, senderName);
+							SetDlgItemTextW(hwnd, IDC_NAME, senderName);
+						} else {
+							// "Auto" selected, clear custom name
+							SetDlgItemTextW(hwnd, IDC_NAME, L"");
+						}
+					}
+					break;
+
 				default :
 					break;
 			}
@@ -174,6 +197,16 @@ HRESULT CSpoutCamProperties::OnActivate()
 	DWORD dwValue = 0;
 	wchar_t wname[256];
 	char name[256];
+
+	////////////////////////////////////////
+	// Initialize Enhanced UI Elements
+	////////////////////////////////////////
+	
+	// Set the camera name display
+	InitializeCameraName();
+	
+	// Populate the available senders list
+	PopulateAvailableSenders();
 
 	////////////////////////////////////////
 	// Fps
@@ -391,4 +424,80 @@ HRESULT CSpoutCamProperties::OnApplyChanges()
 		m_pCamSettings->put_Settings(dwFps, dwResolution, dwMirror, dwSwap, dwFlip, name);
 
 	return S_OK;
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Enhanced UI Methods for Multiple Camera Support
+//////////////////////////////////////////////////////////////////////////
+
+// Helper to determine which camera this properties dialog is for
+HRESULT CSpoutCamProperties::GetCameraIndex(int* pCameraIndex)
+{
+	if (!pCameraIndex) return E_POINTER;
+	
+	// Try to get the camera index from the parent filter
+	// We'll need to query the filter's CLSID and map it to camera index
+	*pCameraIndex = 0; // Default to first camera
+	
+	// TODO: Implement CLSID-to-camera-index mapping
+	// For now, we'll determine based on the registry keys that exist
+	
+	return S_OK;
+}
+
+// Set the correct registry path based on camera index
+void CSpoutCamProperties::SetRegistryPath(char* registryPath, int cameraIndex)
+{
+	if (cameraIndex == 0) {
+		strcpy_s(registryPath, 256, "Software\\Leading Edge\\SpoutCam");
+	} else {
+		sprintf_s(registryPath, 256, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
+	}
+}
+
+// Initialize the camera name display
+void CSpoutCamProperties::InitializeCameraName()
+{
+	int cameraIndex = 0;
+	GetCameraIndex(&cameraIndex);
+	
+	HWND hwndCameraName = GetDlgItem(this->m_Dlg, IDC_CAMERA_NAME);
+	if (hwndCameraName) {
+		WCHAR cameraName[64];
+		if (cameraIndex == 0) {
+			wcscpy_s(cameraName, 64, L"Configuring: SpoutCam");
+		} else {
+			swprintf_s(cameraName, 64, L"Configuring: SpoutCam%d", cameraIndex + 1);
+		}
+		SetWindowTextW(hwndCameraName, cameraName);
+	}
+}
+
+// Populate the sender list with available Spout senders
+void CSpoutCamProperties::PopulateAvailableSenders()
+{
+	HWND hwndSenderList = GetDlgItem(this->m_Dlg, IDC_SENDER_LIST);
+	if (!hwndSenderList) return;
+	
+	// Clear existing items
+	ComboBox_ResetContent(hwndSenderList);
+	
+	// Add "Auto" option (use active sender)
+	ComboBox_AddString(hwndSenderList, L"Auto (Active Sender)");
+	
+	// TODO: Use Spout SDK to enumerate available senders
+	// For now, add some placeholder entries
+	ComboBox_AddString(hwndSenderList, L"Sender1");
+	ComboBox_AddString(hwndSenderList, L"Sender2");
+	ComboBox_AddString(hwndSenderList, L"OBS");
+	ComboBox_AddString(hwndSenderList, L"Resolume");
+	
+	// Select "Auto" by default
+	ComboBox_SetCurSel(hwndSenderList, 0);
+}
+
+// Refresh the sender list
+void CSpoutCamProperties::RefreshSenderList()
+{
+	PopulateAvailableSenders();
 }

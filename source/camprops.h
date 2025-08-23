@@ -21,5 +21,12 @@ private:
 	BOOL m_bIsInitialized;          // Used to ignore startup messages
 	BOOL m_bSilent;                 // Disable warnings mode
 	ICamSettings *m_pCamSettings;   // The custom interface on the filter
+	
+	// Helper methods for enhanced UI
+	void InitializeCameraName();
+	void RefreshSenderList();
+	void PopulateAvailableSenders();
+	HRESULT GetCameraIndex(int* pCameraIndex);
+	void SetRegistryPath(char* registryPath, int cameraIndex);
 };
 
