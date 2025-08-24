@@ -34,7 +34,7 @@ FONT 8, "Ms Shell Dlg"
 	COMBOBOX        IDC_SENDER_LIST, 25, 122, 120, 80, WS_TABSTOP | CBS_DROPDOWN | CBS_HASSTRINGS, WS_EX_LEFT
 	PUSHBUTTON      "Refresh", IDC_REFRESH, 150, 122, 40, 14, 0, WS_EX_LEFT
 	
-	LTEXT           "Custom Sender Name:", -1, 25, 140, 75, 8, SS_LEFT, WS_EX_LEFT
+	LTEXT           "Spout Sender Name:", -1, 25, 140, 75, 8, SS_LEFT, WS_EX_LEFT
 	EDITTEXT        IDC_NAME, 100, 138, 95, 12, WS_TABSTOP | WS_EX_LEFT
 
 	GROUPBOX        "Options", -1, 15, 160, 210, 25, 0, WS_EX_LEFT
