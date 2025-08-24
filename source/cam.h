@@ -62,6 +62,9 @@ extern "C" {
 			DWORD dwFlip,
 			const char *name
 			) PURE;
+		STDMETHOD(get_CameraIndex) (THIS_
+			int *pCameraIndex
+			) PURE;
 	};
 }
 
@@ -105,6 +108,7 @@ public:
 
 	// ICamSettings interface
 	STDMETHODIMP put_Settings(DWORD dwFps, DWORD dwResolution, DWORD dwMirror, DWORD dwSwap, DWORD dwFlip, const char *name);
+	STDMETHODIMP get_CameraIndex(int *pCameraIndex);
 	//<==================== VS-END ======================>
 
 private:

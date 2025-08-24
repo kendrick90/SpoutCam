@@ -24,6 +24,7 @@ private:
 	BOOL m_bIsInitialized;          // Used to ignore startup messages
 	BOOL m_bSilent;                 // Disable warnings mode
 	ICamSettings *m_pCamSettings;   // The custom interface on the filter
+	int m_cameraIndex;              // Index of the camera instance this dialog is configuring
 	
 	// Helper methods for enhanced UI
 	void InitializeCameraName();

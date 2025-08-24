@@ -37,7 +37,8 @@ CUnknown *CSpoutCamProperties::CreateInstance(LPUNKNOWN lpunk, HRESULT *phr)
 CSpoutCamProperties::CSpoutCamProperties(LPUNKNOWN pUnk, HRESULT *phr) :
 	CBasePropertyPage("Settings", pUnk, IDD_SPOUTCAMBOX, IDS_TITLE),
 	m_pCamSettings(NULL),
-	m_bIsInitialized(FALSE)
+	m_bIsInitialized(FALSE),
+	m_cameraIndex(0) // Default to camera 0, will be updated in OnConnect
 {
 	ASSERT(phr);
 	if (phr)
@@ -273,6 +274,13 @@ HRESULT CSpoutCamProperties::OnConnect(IUnknown *pUnknown)
 	// Get the initial image FX property
 	CheckPointer(m_pCamSettings, E_FAIL);
 
+	// Get the camera index from the filter instance
+	hr = m_pCamSettings->get_CameraIndex(&m_cameraIndex);
+	if (FAILED(hr))
+	{
+		m_cameraIndex = 0; // Default to camera 0 if we can't get the index
+	}
+
 	m_bIsInitialized = FALSE;
 
 	return S_OK;
@@ -443,11 +451,11 @@ HRESULT CSpoutCamProperties::OnApplyChanges()
 	char name[256];
 	char keyName[256];
 
-	// Create camera-specific registry key for current tab (match cam.cpp logic)
-	if (g_currentCameraTab == 0) {
+	// Create camera-specific registry key for current camera (match cam.cpp logic)
+	if (m_cameraIndex == 0) {
 		strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
 	} else {
-		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
 	}
 
 	// =================================
@@ -462,7 +470,7 @@ HRESULT CSpoutCamProperties::OnApplyChanges()
 	if (!m_bSilent) {
 		if (dwOldFps != dwFps || dwOldResolution != dwResolution) {
 			wchar_t warningMsg[256];
-			swprintf_s(warningMsg, L"Resolution or FPS change on SpoutCam%d requires reregistration.\n\nClick OK to automatically reregister the camera with new settings.\nClick Cancel to revert changes.", g_currentCameraTab + 1);
+			swprintf_s(warningMsg, L"Resolution or FPS change on SpoutCam%d requires reregistration.\n\nClick OK to automatically reregister the camera with new settings.\nClick Cancel to revert changes.", m_cameraIndex + 1);
 			if (MessageBoxW(NULL, warningMsg, L"Camera Reregistration Required", MB_OKCANCEL | MB_TOPMOST | MB_ICONQUESTION) == IDCANCEL) {
 				if (dwOldFps != dwFps)
 					ComboBox_SetCurSel(GetDlgItem(this->m_Dlg, IDC_FPS), dwOldFps);
@@ -526,8 +534,8 @@ HRESULT CSpoutCamProperties::GetCameraIndex(int* pCameraIndex)
 {
 	if (!pCameraIndex) return E_POINTER;
 	
-	// Return the currently selected camera tab index
-	*pCameraIndex = g_currentCameraTab;
+	// Return the camera index for this specific properties dialog instance
+	*pCameraIndex = m_cameraIndex;
 	
 	return S_OK;
 }
@@ -545,16 +553,13 @@ void CSpoutCamProperties::SetRegistryPath(char* registryPath, int cameraIndex)
 // Initialize the camera name display
 void CSpoutCamProperties::InitializeCameraName()
 {
-	int cameraIndex = 0;
-	GetCameraIndex(&cameraIndex);
-	
 	HWND hwndCameraName = GetDlgItem(this->m_Dlg, IDC_CAMERA_NAME);
 	if (hwndCameraName) {
 		WCHAR cameraName[64];
-		if (cameraIndex == 0) {
+		if (m_cameraIndex == 0) {
 			wcscpy_s(cameraName, 64, L"Configuring: SpoutCam");
 		} else {
-			swprintf_s(cameraName, 64, L"Configuring: SpoutCam%d", cameraIndex + 1);
+			swprintf_s(cameraName, 64, L"Configuring: SpoutCam%d", m_cameraIndex + 1);
 		}
 		SetWindowTextW(hwndCameraName, cameraName);
 	}
@@ -680,8 +685,8 @@ void CSpoutCamProperties::InitializeTabControl()
 	HWND hwndRemove = GetDlgItem(this->m_Dlg, IDC_REMOVE_CAMERA);  
 	if (hwndRemove) ShowWindow(hwndRemove, SW_HIDE);
 
-	// Always use camera index 0 for single camera mode
-	g_currentCameraTab = 0;
+	// Use the camera index from the filter instance
+	g_currentCameraTab = m_cameraIndex;
 	g_activeCameras = 1;
 	
 	// Update the display for this camera
@@ -763,8 +768,8 @@ void CSpoutCamProperties::OnTabSelectionChange()
 // Update the display for the current camera tab
 void CSpoutCamProperties::UpdateCameraDisplay()
 {
-	// Load settings for the current camera tab
-	LoadCameraSettings(g_currentCameraTab);
+	// Load settings for the current camera
+	LoadCameraSettings(m_cameraIndex);
 	
 	// Force refresh of all controls to fix rendering issues
 	RefreshControlsDisplay();
@@ -780,10 +785,10 @@ void CSpoutCamProperties::SaveCurrentCameraSettings()
 	char keyName[256];
 
 	// Create camera-specific registry key (match cam.cpp logic)
-	if (g_currentCameraTab == 0) {
+	if (m_cameraIndex == 0) {
 		strcpy_s(keyName, "SpoutCam");
 	} else {
-		sprintf_s(keyName, "SpoutCam%d", g_currentCameraTab + 1);
+		sprintf_s(keyName, "SpoutCam%d", m_cameraIndex + 1);
 	}
 
 	HWND hwndCtl = GetDlgItem(this->m_Dlg, IDC_FPS);
@@ -798,19 +803,19 @@ void CSpoutCamProperties::SaveCurrentCameraSettings()
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_NAME);
 	Edit_GetText(hwndCtl, wname, 256);
 	WideCharToMultiByte(CP_ACP, 0, wname, -1, name, 256, NULL, NULL);
-	if (g_currentCameraTab == 0) {
+	if (m_cameraIndex == 0) {
 		strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
 	} else {
-		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
 	}
 	WritePathToRegistry(HKEY_CURRENT_USER, keyName, "senderstart", name);
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_MIRROR);
 	dwMirror = Button_GetCheck(hwndCtl);
-	if (g_currentCameraTab == 0) {
+	if (m_cameraIndex == 0) {
 		strcpy_s(name, "Software\\Leading Edge\\SpoutCam");
 	} else {
-		sprintf_s(name, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+		sprintf_s(name, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
 	}
 	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "mirror", dwMirror);
 
@@ -898,11 +903,11 @@ void CSpoutCamProperties::ApplyRealTimeSettings()
 	char name[256];
 	wchar_t wname[256];
 
-	// Create camera-specific registry key for current tab (match cam.cpp logic)
-	if (g_currentCameraTab == 0) {
+	// Create camera-specific registry key for current camera (match cam.cpp logic)
+	if (m_cameraIndex == 0) {
 		strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
 	} else {
-		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
 	}
 
 	// Get current control values
@@ -960,11 +965,11 @@ void CSpoutCamProperties::RefreshControlsDisplay()
 void CSpoutCamProperties::AutoReregisterCamera()
 {
 	// First unregister the current camera
-	HRESULT hr = RegisterSingleCameraFilter(FALSE, g_currentCameraTab);
+	HRESULT hr = RegisterSingleCameraFilter(FALSE, m_cameraIndex);
 	if (FAILED(hr)) {
 		if (!m_bSilent) {
 			wchar_t errorMsg[256];
-			swprintf_s(errorMsg, L"Failed to unregister SpoutCam%d during reregistration.\nYou may need to manually unregister and register the camera.", g_currentCameraTab + 1);
+			swprintf_s(errorMsg, L"Failed to unregister SpoutCam%d during reregistration.\nYou may need to manually unregister and register the camera.", m_cameraIndex + 1);
 			MessageBox(m_Dlg, errorMsg, L"Reregistration Warning", MB_OK | MB_ICONWARNING);
 		}
 		return;
@@ -974,17 +979,17 @@ void CSpoutCamProperties::AutoReregisterCamera()
 	Sleep(100);
 
 	// Re-register the camera with new settings
-	hr = RegisterSingleCameraFilter(TRUE, g_currentCameraTab);
+	hr = RegisterSingleCameraFilter(TRUE, m_cameraIndex);
 	if (SUCCEEDED(hr)) {
 		if (!m_bSilent) {
 			wchar_t successMsg[256];
-			swprintf_s(successMsg, L"SpoutCam%d has been successfully reregistered with new settings.\nThe camera is now ready to use with updated resolution/FPS.", g_currentCameraTab + 1);
+			swprintf_s(successMsg, L"SpoutCam%d has been successfully reregistered with new settings.\nThe camera is now ready to use with updated resolution/FPS.", m_cameraIndex + 1);
 			MessageBox(m_Dlg, successMsg, L"Reregistration Complete", MB_OK | MB_ICONINFORMATION);
 		}
 	} else {
 		if (!m_bSilent) {
 			wchar_t errorMsg[256];
-			swprintf_s(errorMsg, L"Failed to reregister SpoutCam%d.\nPlease manually register the camera using the 'Register This Camera' button.", g_currentCameraTab + 1);
+			swprintf_s(errorMsg, L"Failed to reregister SpoutCam%d.\nPlease manually register the camera using the 'Register This Camera' button.", m_cameraIndex + 1);
 			MessageBox(m_Dlg, errorMsg, L"Reregistration Error", MB_OK | MB_ICONERROR);
 		}
 	}

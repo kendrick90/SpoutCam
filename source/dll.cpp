@@ -13,6 +13,8 @@
 #pragma comment(lib, "ole32")
 #pragma comment(lib, "oleaut32")
 
+#include <stdio.h>
+#include <conio.h>
 #include "cam.h"
 
 //<==================== VS-START ====================>
@@ -369,6 +371,200 @@ extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE UnregisterSingleSpoutCam
     return RegisterSingleCameraFilter(FALSE, cameraIndex);
 }
 
+// Configure a specific camera instance 
+extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCamera(HWND hwndStub, HINSTANCE hinst, LPSTR lpszCmdLine, int nCmdShow)
+{
+	HRESULT hr;
+	IBaseFilter *pFilter;
+	CUnknown *pInstance;
+	int cameraIndex = 0;
+
+	// Allocate console for debugging
+	AllocConsole();
+	FILE* pCout;
+	freopen_s(&pCout, "CONOUT$", "w", stdout);
+	SetConsoleTitle(L"SpoutCam Configuration Debug");
+	
+	printf("=== ConfigureSpoutCamera Debug Session ===\n");
+	printf("Raw command line: '%s'\n", lpszCmdLine ? lpszCmdLine : "(null)");
+	
+	// Parse camera index from command line
+	if (lpszCmdLine && *lpszCmdLine) {
+		cameraIndex = atoi(lpszCmdLine);
+		printf("Parsed camera index: %d\n", cameraIndex);
+	} else {
+		printf("No command line parameter, using default camera 0\n");
+		cameraIndex = 0;
+	}
+	
+	// Validate camera index
+	if (cameraIndex < 0 || cameraIndex >= MAX_SPOUT_CAMERAS) {
+		printf("ERROR: Invalid camera index %d (valid range: 0-%d)\n", cameraIndex, MAX_SPOUT_CAMERAS-1);
+		printf("Using camera 0 instead\n");
+		cameraIndex = 0;
+	}
+	
+	printf("ConfigureSpoutCamera: Starting configuration for camera %d\n", cameraIndex);
+
+	hr = CoInitialize(nullptr);
+	if (FAILED(hr)) {
+		printf("ConfigureSpoutCamera: CoInitialize failed with HRESULT 0x%08X\n", hr);
+		printf("Press any key to exit...\n");
+		_getch();
+		return;
+	}
+	printf("ConfigureSpoutCamera: CoInitialize succeeded\n");
+
+	// Create the specific camera instance
+	printf("ConfigureSpoutCamera: Creating camera instance %d...\n", cameraIndex);
+	pInstance = CVCam::CreateCameraInstance(nullptr, &hr, cameraIndex);
+	if (SUCCEEDED(hr))
+	{
+		printf("ConfigureSpoutCamera: Camera instance created successfully\n");
+		hr = pInstance->NonDelegatingQueryInterface(IID_IBaseFilter, (void **)&pFilter);
+		if (SUCCEEDED(hr))
+		{
+			printf("ConfigureSpoutCamera: IBaseFilter interface obtained\n");
+			// Open the settings dialog for the specific camera
+			printf("ConfigureSpoutCamera: Opening property page...\n");
+			hr = ShowFilterPropertyPage(pFilter, GetDesktopWindow());
+			if (SUCCEEDED(hr)) {
+				printf("ConfigureSpoutCamera: Property page opened successfully\n");
+			} else {
+				printf("ConfigureSpoutCamera: ShowFilterPropertyPage failed with HRESULT 0x%08X\n", hr);
+				
+				// Print common error meanings
+				switch (hr) {
+					case 0x80040154: printf("  -> Class not registered\n"); break;
+					case 0x80004002: printf("  -> No such interface supported\n"); break;
+					case 0x80070005: printf("  -> Access denied\n"); break;
+					case 0x8007000E: printf("  -> Not enough memory\n"); break;
+					case 0x80004005: printf("  -> Unspecified error\n"); break;
+					default: printf("  -> Unknown error\n"); break;
+				}
+			}
+			pFilter->Release();
+		}
+		else {
+			printf("ConfigureSpoutCamera: Failed to get IBaseFilter interface, HRESULT 0x%08X\n", hr);
+		}
+		delete pInstance;
+	}
+	else {
+		printf("ConfigureSpoutCamera: Failed to create camera instance, HRESULT 0x%08X\n", hr);
+	}
+
+	printf("ConfigureSpoutCamera: Configuration completed\n");
+	printf("\nPress any key to close this debug window...\n");
+	_getch(); // Wait for user input before closing console
+	
+	CoUninitialize();
+	FreeConsole();
+}
+
+// Configure a specific camera instance by reading from file
+extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCameraFromFile(HWND hwndStub, HINSTANCE hinst, LPSTR lpszCmdLine, int nCmdShow)
+{
+	HRESULT hr;
+	IBaseFilter *pFilter;
+	CUnknown *pInstance;
+	int cameraIndex = 0;
+
+	// Allocate console for debugging
+	AllocConsole();
+	FILE* pCout;
+	freopen_s(&pCout, "CONOUT$", "w", stdout);
+	SetConsoleTitle(L"SpoutCam Configuration Debug");
+	
+	printf("=== ConfigureSpoutCameraFromFile Debug Session ===\n");
+	
+	// Read camera index from temporary file
+	FILE* indexFile = nullptr;
+	if (fopen_s(&indexFile, "camera_index.tmp", "r") == 0 && indexFile) {
+		char buffer[256];
+		if (fgets(buffer, sizeof(buffer), indexFile)) {
+			printf("Read from file: '%s'\n", buffer);
+			// Parse "Camera index: N" format
+			if (sscanf_s(buffer, "Camera index: %d", &cameraIndex) == 1) {
+				printf("Parsed camera index: %d\n", cameraIndex);
+			} else {
+				printf("Failed to parse camera index from: '%s'\n", buffer);
+				cameraIndex = 0;
+			}
+		}
+		fclose(indexFile);
+		// Clean up temp file
+		DeleteFileA("camera_index.tmp");
+	} else {
+		printf("Could not read camera_index.tmp, using default camera 0\n");
+		cameraIndex = 0;
+	}
+	
+	// Validate camera index
+	if (cameraIndex < 0 || cameraIndex >= MAX_SPOUT_CAMERAS) {
+		printf("ERROR: Invalid camera index %d (valid range: 0-%d)\n", cameraIndex, MAX_SPOUT_CAMERAS-1);
+		printf("Using camera 0 instead\n");
+		cameraIndex = 0;
+	}
+	
+	printf("ConfigureSpoutCameraFromFile: Starting configuration for camera %d\n", cameraIndex);
+
+	hr = CoInitialize(nullptr);
+	if (FAILED(hr)) {
+		printf("ConfigureSpoutCameraFromFile: CoInitialize failed with HRESULT 0x%08X\n", hr);
+		printf("Press any key to exit...\n");
+		_getch();
+		return;
+	}
+	printf("ConfigureSpoutCameraFromFile: CoInitialize succeeded\n");
+
+	// Create the specific camera instance
+	printf("ConfigureSpoutCameraFromFile: Creating camera instance %d...\n", cameraIndex);
+	pInstance = CVCam::CreateCameraInstance(nullptr, &hr, cameraIndex);
+	if (SUCCEEDED(hr))
+	{
+		printf("ConfigureSpoutCameraFromFile: Camera instance created successfully\n");
+		hr = pInstance->NonDelegatingQueryInterface(IID_IBaseFilter, (void **)&pFilter);
+		if (SUCCEEDED(hr))
+		{
+			printf("ConfigureSpoutCameraFromFile: IBaseFilter interface obtained\n");
+			// Open the settings dialog for the specific camera
+			printf("ConfigureSpoutCameraFromFile: Opening property page...\n");
+			hr = ShowFilterPropertyPage(pFilter, GetDesktopWindow());
+			if (SUCCEEDED(hr)) {
+				printf("ConfigureSpoutCameraFromFile: Property page opened successfully\n");
+			} else {
+				printf("ConfigureSpoutCameraFromFile: ShowFilterPropertyPage failed with HRESULT 0x%08X\n", hr);
+				
+				// Print common error meanings
+				switch (hr) {
+					case 0x80040154: printf("  -> Class not registered (filter may not be registered)\n"); break;
+					case 0x80004002: printf("  -> No such interface supported\n"); break;
+					case 0x80070005: printf("  -> Access denied\n"); break;
+					case 0x8007000E: printf("  -> Not enough memory\n"); break;
+					case 0x80004005: printf("  -> Unspecified error\n"); break;
+					default: printf("  -> Unknown error\n"); break;
+				}
+			}
+			pFilter->Release();
+		}
+		else {
+			printf("ConfigureSpoutCameraFromFile: Failed to get IBaseFilter interface, HRESULT 0x%08X\n", hr);
+		}
+		delete pInstance;
+	}
+	else {
+		printf("ConfigureSpoutCameraFromFile: Failed to create camera instance, HRESULT 0x%08X\n", hr);
+	}
+
+	printf("ConfigureSpoutCameraFromFile: Configuration completed\n");
+	printf("\nPress any key to close this debug window...\n");
+	_getch(); // Wait for user input before closing console
+	
+	CoUninitialize();
+	FreeConsole();
+}
+
 //<==================== VS-START ====================>
 #ifdef DIALOG_WITHOUT_REGISTRATION
 
@@ -407,30 +603,67 @@ void CALLBACK Configure()
 	IBaseFilter *pFilter;
 	CUnknown *pInstance;
 
-	CoInitialize(nullptr);
+	// Allocate console for debugging
+	AllocConsole();
+	FILE* pCout;
+	freopen_s(&pCout, "CONOUT$", "w", stdout);
+	
+	printf("Configure: Starting configuration for default camera (camera 0)\n");
+
+	hr = CoInitialize(nullptr);
+	if (FAILED(hr)) {
+		printf("Configure: CoInitialize failed with HRESULT 0x%08X\n", hr);
+		return;
+	}
+	printf("Configure: CoInitialize succeeded\n");
 
 	// Obtain the filter's IBaseFilter interface.
+	printf("Configure: Creating default camera instance...\n");
 	pInstance = CVCam::CreateInstance(nullptr, &hr);
 	if (SUCCEEDED(hr))
 	{
+		printf("Configure: Default camera instance created successfully\n");
 		hr = pInstance->NonDelegatingQueryInterface(IID_IBaseFilter, (void **)&pFilter);
 		if (SUCCEEDED(hr))
 		{
+			printf("Configure: IBaseFilter interface obtained\n");
 			// If the filter is registered, this will open the settings dialog.
+			printf("Configure: Opening property page...\n");
 			hr = ShowFilterPropertyPage(pFilter, GetDesktopWindow());
+			if (SUCCEEDED(hr)) {
+				printf("Configure: Property page opened successfully\n");
+			} else {
+				printf("Configure: ShowFilterPropertyPage failed with HRESULT 0x%08X\n", hr);
+			}
 
 #ifdef DIALOG_WITHOUT_REGISTRATION
 			if (FAILED(hr))
 			{
+				printf("Configure: Trying ShowFilterPropertyPageDirect as fallback...\n");
 				// The filter propably isn't registered in the system;
 				// This will open the settings dialog anyway.
 				hr = ShowFilterPropertyPageDirect(pFilter, GetDesktopWindow());
+				if (SUCCEEDED(hr)) {
+					printf("Configure: ShowFilterPropertyPageDirect succeeded\n");
+				} else {
+					printf("Configure: ShowFilterPropertyPageDirect also failed with HRESULT 0x%08X\n", hr);
+				}
 			}
 #endif
 			pFilter->Release();
 		}
+		else {
+			printf("Configure: Failed to get IBaseFilter interface, HRESULT 0x%08X\n", hr);
+		}
 		delete pInstance;
 	}
+	else {
+		printf("Configure: Failed to create default camera instance, HRESULT 0x%08X\n", hr);
+	}
+
+	printf("Configure: Configuration completed\n");
+	printf("Press any key to close console...\n");
+	_getch(); // Wait for user input before closing console
 
 	CoUninitialize();
 }

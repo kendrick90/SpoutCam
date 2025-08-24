@@ -495,6 +495,13 @@ STDMETHODIMP CVCam::put_Settings(DWORD dwFps, DWORD dwResolution, DWORD dwMirror
 	return S_OK;
 }
 
+STDMETHODIMP CVCam::get_CameraIndex(int *pCameraIndex)
+{
+	if (!pCameraIndex) return E_POINTER;
+	*pCameraIndex = m_cameraIndex;
+	return S_OK;
+}
+
 //<==================== VS-END ======================>
 
 ///////////////////////////////////////////////////////////
