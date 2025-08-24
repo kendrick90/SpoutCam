@@ -528,23 +528,39 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCameraFromFil
 		if (SUCCEEDED(hr))
 		{
 			printf("ConfigureSpoutCameraFromFile: IBaseFilter interface obtained\n");
-			// Open the settings dialog for the specific camera
-			printf("ConfigureSpoutCameraFromFile: Opening property page...\n");
-			hr = ShowFilterPropertyPage(pFilter, GetDesktopWindow());
+			
+			// Check if the filter has a property page
+			ISpecifyPropertyPages *pProp = NULL;
+			hr = pFilter->QueryInterface(IID_ISpecifyPropertyPages, (void **)&pProp);
 			if (SUCCEEDED(hr)) {
-				printf("ConfigureSpoutCameraFromFile: Property page opened successfully\n");
-			} else {
-				printf("ConfigureSpoutCameraFromFile: ShowFilterPropertyPage failed with HRESULT 0x%08X\n", hr);
+				printf("ConfigureSpoutCameraFromFile: Filter supports property pages\n");
+				pProp->Release();
 				
-				// Print common error meanings
-				switch (hr) {
-					case 0x80040154: printf("  -> Class not registered (filter may not be registered)\n"); break;
-					case 0x80004002: printf("  -> No such interface supported\n"); break;
-					case 0x80070005: printf("  -> Access denied\n"); break;
-					case 0x8007000E: printf("  -> Not enough memory\n"); break;
-					case 0x80004005: printf("  -> Unspecified error\n"); break;
-					default: printf("  -> Unknown error\n"); break;
+				// Try to show property page using DirectShow method
+				printf("ConfigureSpoutCameraFromFile: Opening property page...\n");
+				hr = ShowFilterPropertyPage(pFilter, GetDesktopWindow());
+				if (SUCCEEDED(hr)) {
+					printf("ConfigureSpoutCameraFromFile: Property page opened successfully\n");
+				} else {
+					printf("ConfigureSpoutCameraFromFile: ShowFilterPropertyPage failed with HRESULT 0x%08X\n", hr);
+					printf("ConfigureSpoutCameraFromFile: This usually means no SpoutCam cameras are registered in the system\n");
+					printf("ConfigureSpoutCameraFromFile: Solution: Register at least one camera first, then configuration will work\n");
+					printf("ConfigureSpoutCameraFromFile: Use SpoutCamSettings.exe to register cameras\n");
+					
+					// Show user-friendly error message
+					MessageBoxA(GetDesktopWindow(), 
+						"Cannot open camera configuration.\n\n"
+						"This happens when no SpoutCam cameras are registered in the system.\n\n"
+						"Solution:\n"
+						"1. Open SpoutCamSettings.exe\n"
+						"2. Click 'Register' for at least one camera\n"
+						"3. Then 'Configure' will work for all cameras\n\n"
+						"Once any camera is registered, you can configure any camera (even unregistered ones).",
+						"SpoutCam Configuration Error", 
+						MB_OK | MB_ICONINFORMATION);
 				}
+			} else {
+				printf("ConfigureSpoutCameraFromFile: Filter does not support property pages, HRESULT 0x%08X\n", hr);
 			}
 			pFilter->Release();
 		}

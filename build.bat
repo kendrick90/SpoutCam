@@ -14,19 +14,7 @@ cd /d "%SCRIPT_DIR%"
 :: Define paths
 set "MSBUILD_PATH=C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
 
-:: Ask which architecture to build
-echo Select build configuration:
-echo 1. Build x64 only
-echo 2. Build x86 only  
-echo 3. Build both x64 and x86 (default)
-set /p CHOICE="Enter choice (1-3) or press Enter for default: "
-
-if "%CHOICE%"=="1" goto BUILD_X64
-if "%CHOICE%"=="2" goto BUILD_X86
-if "%CHOICE%"=="3" goto BUILD_BOTH
-if "%CHOICE%"=="" goto BUILD_BOTH
-echo Invalid choice. Building both architectures by default.
-goto BUILD_BOTH
+echo Building both x64 and x86...
 
 :BUILD_BOTH
 call :BuildArch x64

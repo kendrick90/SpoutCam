@@ -18,6 +18,7 @@ private:
 	HRESULT OnActivate();
 	HRESULT OnDeactivate();
 	HRESULT OnApplyChanges();
+	STDMETHODIMP GetPageInfo(LPPROPPAGEINFO pPageInfo);
 
 	CSpoutCamProperties(LPUNKNOWN lpunk, HRESULT *phr);
 

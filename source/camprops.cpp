@@ -35,7 +35,7 @@ CUnknown *CSpoutCamProperties::CreateInstance(LPUNKNOWN lpunk, HRESULT *phr)
 
 // Constructor
 CSpoutCamProperties::CSpoutCamProperties(LPUNKNOWN pUnk, HRESULT *phr) :
-	CBasePropertyPage("Settings", pUnk, IDD_SPOUTCAMBOX, IDS_TITLE),
+	CBasePropertyPage("SpoutCam Configuration", pUnk, IDD_SPOUTCAMBOX, IDS_TITLE),
 	m_pCamSettings(NULL),
 	m_bIsInitialized(FALSE),
 	m_cameraIndex(0) // Default to camera 0, will be updated in OnConnect
@@ -43,6 +43,8 @@ CSpoutCamProperties::CSpoutCamProperties(LPUNKNOWN pUnk, HRESULT *phr) :
 	ASSERT(phr);
 	if (phr)
 		*phr = S_OK;
+	
+	OutputDebugStringA("CSpoutCamProperties: Constructor called");
 }
 
 //OnReceiveMessage is called when the dialog receives a window message.
@@ -194,15 +196,6 @@ INT_PTR CSpoutCamProperties::OnReceiveMessage(HWND hwnd, UINT uMsg, WPARAM wPara
 					break;
 
 
-				case IDC_ADD_CAMERA:
-					// Add a new camera tab
-					AddCameraTab();
-					break;
-
-				case IDC_REMOVE_CAMERA:
-					// Remove current camera tab
-					RemoveCameraTab();
-					break;
 
 				case IDC_SENDER_LIST:
 					// Handle sender selection change
@@ -258,12 +251,14 @@ INT_PTR CSpoutCamProperties::OnReceiveMessage(HWND hwnd, UINT uMsg, WPARAM wPara
 HRESULT CSpoutCamProperties::OnConnect(IUnknown *pUnknown)
 {
 	TRACE("OnConnect");
+	OutputDebugStringA("CSpoutCamProperties: OnConnect called");
 	CheckPointer(pUnknown, E_POINTER);
 	ASSERT(m_pCamSettings == NULL);
 
 	HRESULT hr = pUnknown->QueryInterface(IID_ICamSettings, (void **)&m_pCamSettings);
 	if (FAILED(hr))
 	{
+		OutputDebugStringA("CSpoutCamProperties: OnConnect - QueryInterface failed");
 		return E_NOINTERFACE;
 	}
 
@@ -275,6 +270,11 @@ HRESULT CSpoutCamProperties::OnConnect(IUnknown *pUnknown)
 	if (FAILED(hr))
 	{
 		m_cameraIndex = 0; // Default to camera 0 if we can't get the index
+		OutputDebugStringA("CSpoutCamProperties: OnConnect - Failed to get camera index, using 0");
+	} else {
+		char debugMsg[128];
+		sprintf_s(debugMsg, "CSpoutCamProperties: OnConnect - Got camera index: %d", m_cameraIndex);
+		OutputDebugStringA(debugMsg);
 	}
 
 	m_bIsInitialized = FALSE;
@@ -546,18 +546,66 @@ void CSpoutCamProperties::SetRegistryPath(char* registryPath, int cameraIndex)
 	}
 }
 
+// Override to provide dynamic tab title
+STDMETHODIMP CSpoutCamProperties::GetPageInfo(LPPROPPAGEINFO pPageInfo)
+{
+	CheckPointer(pPageInfo, E_POINTER);
+	
+	// Get the camera index directly from the filter if available
+	int actualCameraIndex = m_cameraIndex; // Default to member variable
+	if (m_pCamSettings) {
+		HRESULT hr = m_pCamSettings->get_CameraIndex(&actualCameraIndex);
+		if (FAILED(hr)) {
+			actualCameraIndex = m_cameraIndex; // Fall back to member variable
+		}
+	}
+	
+	// Debug output to see what camera index we're using
+	char debugMsg[128];
+	sprintf_s(debugMsg, "GetPageInfo: m_cameraIndex = %d, actualCameraIndex = %d", m_cameraIndex, actualCameraIndex);
+	OutputDebugStringA(debugMsg);
+	
+	// Set tab title to "Settings"
+	WCHAR cameraName[64];
+	wcscpy_s(cameraName, 64, L"Settings");
+	
+	// More debug output
+	char debugMsg2[128];
+	sprintf_s(debugMsg2, "GetPageInfo: Setting tab title to: %S", cameraName);
+	OutputDebugStringA(debugMsg2);
+	
+	// Allocate memory for the title and copy it
+	LPOLESTR pszTitle = (LPOLESTR)CoTaskMemAlloc(wcslen(cameraName) * sizeof(WCHAR) + sizeof(WCHAR));
+	if (pszTitle == NULL) {
+		return E_OUTOFMEMORY;
+	}
+	wcscpy_s(pszTitle, wcslen(cameraName) + 1, cameraName);
+	
+	// Fill in the page info
+	pPageInfo->cb = sizeof(PROPPAGEINFO);
+	pPageInfo->pszTitle = pszTitle;
+	pPageInfo->size.cx = 250;
+	pPageInfo->size.cy = 440;
+	pPageInfo->pszDocString = NULL;
+	pPageInfo->pszHelpFile = NULL;
+	pPageInfo->dwHelpContext = 0;
+	
+	return S_OK;
+}
+
 // Initialize the camera name display
 void CSpoutCamProperties::InitializeCameraName()
 {
-	HWND hwndCameraName = GetDlgItem(this->m_Dlg, IDC_CAMERA_NAME);
-	if (hwndCameraName) {
+	// Update the camera name label in the dialog to show the specific camera
+	HWND hwndName = GetDlgItem(this->m_Dlg, IDC_CAMERA_NAME);
+	if (hwndName) {
 		WCHAR cameraName[64];
 		if (m_cameraIndex == 0) {
-			wcscpy_s(cameraName, 64, L"Configuring: SpoutCam");
+			wcscpy_s(cameraName, 64, L"SpoutCam");
 		} else {
-			swprintf_s(cameraName, 64, L"Configuring: SpoutCam%d", m_cameraIndex + 1);
+			swprintf_s(cameraName, 64, L"SpoutCam%d", m_cameraIndex + 1);
 		}
-		SetWindowTextW(hwndCameraName, cameraName);
+		Static_SetText(hwndName, cameraName);
 	}
 }
 
@@ -668,23 +716,7 @@ void CSpoutCamProperties::UnregisterSingleCamera(int cameraIndex)
 // Initialize the properties dialog for a single camera
 void CSpoutCamProperties::InitializeTabControl()
 {
-	// Remove tab control - this is now a single camera properties dialog
-	HWND hwndTab = GetDlgItem(this->m_Dlg, IDC_CAMERA_TABS);
-	if (hwndTab) {
-		ShowWindow(hwndTab, SW_HIDE);
-	}
-	
-	// Hide Add/Remove camera buttons and Unregister All - managed by SpoutCamSettings now
-	HWND hwndAdd = GetDlgItem(this->m_Dlg, IDC_ADD_CAMERA);
-	if (hwndAdd) ShowWindow(hwndAdd, SW_HIDE);
-	
-	HWND hwndRemove = GetDlgItem(this->m_Dlg, IDC_REMOVE_CAMERA);  
-	if (hwndRemove) ShowWindow(hwndRemove, SW_HIDE);
-	
-	HWND hwndUnregisterAll = GetDlgItem(this->m_Dlg, IDC_UNREGISTER_ALL);
-	if (hwndUnregisterAll) ShowWindow(hwndUnregisterAll, SW_HIDE);
-
-	// Use the camera index from the filter instance
+	// This is now a single camera properties dialog - no tabs or multi-camera controls
 	g_currentCameraTab = m_cameraIndex;
 	g_activeCameras = 1;
 	
