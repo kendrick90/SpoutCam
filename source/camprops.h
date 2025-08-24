@@ -33,6 +33,8 @@ private:
 	void PopulateAvailableSenders();
 	HRESULT GetCameraIndex(int* pCameraIndex);
 	void SetRegistryPath(char* registryPath, int cameraIndex);
+	void UpdateCameraName(const char* newName);
+	void LoadCameraName();
 	
 	// Camera registration methods
 	void RegisterCameras();

@@ -96,12 +96,17 @@ struct StaticCameraConfig {
     }
 };
 
+// Timer ID for auto-refresh
+#define TIMER_AUTO_REFRESH 1001
+#define AUTO_REFRESH_INTERVAL_MS 3000  // 3 seconds - balance between responsiveness and performance
+
 // Forward declarations
 INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK AddCameraDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 void PopulateCameraList(HWND hListView);
 void ScanDynamicCameras();
 void RefreshCameraList(HWND hListView);
+void AutoRefreshCameraList(HWND hListView);
 bool RegisterCamera(const DynamicCamera& camera);
 bool UnregisterCamera(const DynamicCamera& camera);
 void OpenCameraProperties(const DynamicCamera& camera);
@@ -652,6 +657,62 @@ void RefreshCameraList(HWND hListView)
     }
 }
 
+// Lighter auto-refresh that only updates if there are actual changes
+void AutoRefreshCameraList(HWND hListView)
+{
+    // Store current camera count and registration states to detect changes
+    static size_t lastCameraCount = 0;
+    static std::vector<bool> lastRegistrationStates;
+    
+    // Rescan data (but reuse cache where possible)
+    ScanRegisteredFilters();
+    ScanDynamicCameras();
+    
+    // Check if anything changed
+    bool needsUpdate = false;
+    
+    // Check camera count change
+    if (g_dynamicCameras.size() != lastCameraCount) {
+        needsUpdate = true;
+        lastCameraCount = g_dynamicCameras.size();
+    }
+    
+    // Check registration state changes
+    if (lastRegistrationStates.size() != g_dynamicCameras.size()) {
+        lastRegistrationStates.resize(g_dynamicCameras.size());
+        needsUpdate = true;
+    }
+    
+    for (size_t i = 0; i < g_dynamicCameras.size(); i++) {
+        if (i >= lastRegistrationStates.size() || lastRegistrationStates[i] != g_dynamicCameras[i].isRegistered) {
+            lastRegistrationStates[i] = g_dynamicCameras[i].isRegistered;
+            needsUpdate = true;
+        }
+    }
+    
+    // Only update UI if something actually changed
+    if (needsUpdate) {
+        LOG("Camera state changed, updating list display\n");
+        PopulateCameraList(hListView);
+        
+        // Update button state
+        HWND hParent = GetParent(hListView);
+        if (hParent) {
+            HWND hAddButton = GetDlgItem(hParent, IDC_ADD_NEW_CAMERA);
+            if (hAddButton) {
+                bool canAddMore = g_dynamicCameras.size() < MAX_DYNAMIC_CAMERAS;
+                EnableWindow(hAddButton, canAddMore ? TRUE : FALSE);
+                
+                if (canAddMore) {
+                    SetWindowTextA(hAddButton, "Add New Camera");
+                } else {
+                    SetWindowTextA(hAddButton, "Add New Camera (Max 8)");
+                }
+            }
+        }
+    }
+}
+
 void PopulateCameraList(HWND hListView)
 {
     // Scan for registered filters and dynamic cameras
@@ -1087,6 +1148,10 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                 // Populate the camera list
                 RefreshCameraList(hListView);
                 
+                // Start auto-refresh timer
+                SetTimer(hDlg, TIMER_AUTO_REFRESH, AUTO_REFRESH_INTERVAL_MS, NULL);
+                LOG("Started auto-refresh timer with %d ms interval\n", AUTO_REFRESH_INTERVAL_MS);
+                
                 return (INT_PTR)TRUE;
             }
             
@@ -1097,7 +1162,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                 switch (wmId) {
                     case IDC_ADD_NEW_CAMERA:
                         {
-                            // Check if maximum cameras reached before opening dialog
+                            // Check if maximum cameras reached
                             if (g_dynamicCameras.size() >= MAX_DYNAMIC_CAMERAS) {
                                 MessageBox(hDlg, 
                                     "Maximum number of cameras (8) has been reached.\n\n"
@@ -1107,12 +1172,48 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                 break;
                             }
                             
-                            // Show Add New Camera dialog
-                            INT_PTR result = DialogBox(g_hInst, MAKEINTRESOURCE(IDD_ADD_CAMERA_DIALOG), hDlg, AddCameraDialogProc);
-                            if (result == IDOK) {
+                            // Generate default camera name and create camera directly
+                            std::string defaultName = GenerateDefaultCameraName();
+                            CameraCreationResult result = CreateNewCameraEx(defaultName.c_str());
+                            
+                            if (result == CAMERA_CREATE_SUCCESS) {
                                 // Camera was created successfully, refresh the list
                                 RefreshCameraList(hListView);
-                                LOG("New camera added successfully\n");
+                                LOG("New camera '%s' added successfully\n", defaultName.c_str());
+                                
+                                // Find the newly created camera and open its properties
+                                for (size_t i = 0; i < g_dynamicCameras.size(); i++) {
+                                    if (g_dynamicCameras[i].name == defaultName) {
+                                        // Select the new camera in the list
+                                        ListView_SetItemState(hListView, (int)i, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+                                        
+                                        // Open its properties dialog
+                                        OpenCameraProperties(g_dynamicCameras[i]);
+                                        break;
+                                    }
+                                }
+                            } else {
+                                // Show error message based on the result
+                                const char* errorMessage;
+                                const char* errorTitle;
+                                
+                                switch (result) {
+                                    case CAMERA_CREATE_MAX_REACHED:
+                                        errorMessage = "Maximum number of cameras (8) has been reached.";
+                                        errorTitle = "Maximum Cameras Reached";
+                                        break;
+                                    case CAMERA_CREATE_REGISTRY_ERROR:
+                                        errorMessage = "Failed to save camera configuration to registry.";
+                                        errorTitle = "Registry Error";
+                                        break;
+                                    default:
+                                        errorMessage = "Failed to create camera due to an unknown error.";
+                                        errorTitle = "Creation Failed";
+                                        break;
+                                }
+                                
+                                MessageBox(hDlg, errorMessage, errorTitle, MB_OK | MB_ICONERROR);
+                                LOG("Failed to create camera: %s\n", errorMessage);
                             }
                         }
                         break;
@@ -1259,6 +1360,25 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                         EndDialog(hDlg, LOWORD(wParam));
                         return (INT_PTR)TRUE;
                 }
+            }
+            break;
+            
+        case WM_TIMER:
+            {
+                if (wParam == TIMER_AUTO_REFRESH) {
+                    // Perform auto-refresh - but only if dialog is visible
+                    if (IsWindowVisible(hDlg)) {
+                        AutoRefreshCameraList(hListView);
+                    }
+                }
+            }
+            break;
+            
+        case WM_DESTROY:
+            {
+                // Clean up timer
+                KillTimer(hDlg, TIMER_AUTO_REFRESH);
+                LOG("Stopped auto-refresh timer\n");
             }
             break;
     }
