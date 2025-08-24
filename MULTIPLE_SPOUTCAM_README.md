@@ -26,10 +26,28 @@ This will create 8 files in `binaries\MULTIPLE_SPOUTCAM\`:
 - `SpoutCam3_64.ax` and `SpoutCam3_32.ax` (64-bit and 32-bit)  
 - `SpoutCam4_64.ax` and `SpoutCam4_32.ax` (64-bit and 32-bit)
 
-### Step 2: Register All Instances
+### Step 2: Register Instances
+
+**Option A: Interactive Manager** (recommended)
 ```batch
-# Right-click and "Run as Administrator"
+# Right-click and "Run as Administrator" 
+spoutcam_manager.bat
+
+# OR use auto-admin script
+spoutcam_manager_admin.bat
+```
+
+**Option B: Register all at once**
+```batch
 register_all_spoutcams.bat
+```
+
+**Option C: Register individually** (for troubleshooting)
+```batch
+register_spoutcam1.bat
+register_spoutcam2.bat  
+register_spoutcam3.bat
+register_spoutcam4.bat
 ```
 
 ### Step 3: Configure Each Camera
@@ -120,10 +138,17 @@ DEFINE_GUID(CLSID_SpoutCam, 0x8e14549a, 0xdb61, 0x4309, 0xaf, 0xa1, 0x35, 0x78, 
 
 ## Uninstalling
 
-To remove all SpoutCam instances:
+**Option A: Unregister all at once**
 ```batch
-# Right-click and "Run as Administrator"  
 unregister_all_spoutcams.bat
+```
+
+**Option B: Unregister individually**
+```batch
+unregister_spoutcam1.bat
+unregister_spoutcam2.bat
+unregister_spoutcam3.bat
+unregister_spoutcam4.bat
 ```
 
 ## Manual Building (Advanced)
