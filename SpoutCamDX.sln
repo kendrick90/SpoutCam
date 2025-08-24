@@ -13,6 +13,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BaseClasses", "baseclasses\
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SpoutDX", "SpoutDX\winproj2017\SpoutDX.vcxproj", "{62631E0D-AB94-4E97-AF8B-63E7E108C30E}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SpoutCamSettings", "SpoutCamSettings.vcxproj", "{B44243DA-9677-49A3-AC13-689EAA8A4E9E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -45,6 +47,14 @@ Global
 		{62631E0D-AB94-4E97-AF8B-63E7E108C30E}.Release|x64.Build.0 = Release|x64
 		{62631E0D-AB94-4E97-AF8B-63E7E108C30E}.Release|x86.ActiveCfg = Release|Win32
 		{62631E0D-AB94-4E97-AF8B-63E7E108C30E}.Release|x86.Build.0 = Release|Win32
+		{B44243DA-9677-49A3-AC13-689EAA8A4E9E}.Debug|x64.ActiveCfg = Release|x64
+		{B44243DA-9677-49A3-AC13-689EAA8A4E9E}.Debug|x64.Build.0 = Release|x64
+		{B44243DA-9677-49A3-AC13-689EAA8A4E9E}.Debug|x86.ActiveCfg = Release|Win32
+		{B44243DA-9677-49A3-AC13-689EAA8A4E9E}.Debug|x86.Build.0 = Release|Win32
+		{B44243DA-9677-49A3-AC13-689EAA8A4E9E}.Release|x64.ActiveCfg = Release|x64
+		{B44243DA-9677-49A3-AC13-689EAA8A4E9E}.Release|x64.Build.0 = Release|x64
+		{B44243DA-9677-49A3-AC13-689EAA8A4E9E}.Release|x86.ActiveCfg = Release|Win32
+		{B44243DA-9677-49A3-AC13-689EAA8A4E9E}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
