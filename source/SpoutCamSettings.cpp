@@ -47,6 +47,7 @@ bool RestartAsAdmin();
 void ScanRegisteredFilters();
 bool ReadStringFromRegistry(HKEY hKey, const char* subkey, const char* valuename, char* buffer, DWORD bufferSize);
 bool ReadDwordFromRegistry(HKEY hKey, const char* subkey, const char* valuename, DWORD* value);
+void DeleteCameraConfiguration(int cameraIndex);
 
 // Function typedefs for DLL exports
 typedef HRESULT (STDAPICALLTYPE *RegisterSingleSpoutCameraFunc)(int cameraIndex);
@@ -144,6 +145,30 @@ bool ReadDwordFromRegistry(HKEY hKey, const char* subkey, const char* valuename,
     
     RegCloseKey(key);
     return result;
+}
+
+void DeleteCameraConfiguration(int cameraIndex)
+{
+    char keyName[256];
+    
+    // Build registry key name (match cam.cpp logic)
+    if (cameraIndex == 0) {
+        strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
+    } else {
+        sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
+    }
+    
+    LOG("Deleting configuration for camera %d (registry key: %s)\n", cameraIndex + 1, keyName);
+    
+    // Delete the entire registry key and all its values
+    LONG result = RegDeleteTreeA(HKEY_CURRENT_USER, keyName);
+    if (result == ERROR_SUCCESS) {
+        LOG("Successfully deleted configuration for camera %d\n", cameraIndex + 1);
+    } else if (result == ERROR_FILE_NOT_FOUND) {
+        LOG("No configuration found for camera %d (key didn't exist)\n", cameraIndex + 1);
+    } else {
+        LOG("Failed to delete configuration for camera %d, error code: %ld\n", cameraIndex + 1, result);
+    }
 }
 
 bool IsCameraRegistered(int cameraIndex)
@@ -458,27 +483,37 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                         
                     case IDC_CLEANUP:
                         {
-                            // Cleanup orphaned camera registrations for all 8 cameras
+                            // Cleanup orphaned camera registrations and configurations for all 8 cameras
                             int result = MessageBox(hDlg, 
-                                "This will unregister ALL SpoutCam cameras (1-8) to clean up orphaned registrations.\n\n"
+                                "This will unregister ALL SpoutCam cameras (1-8) and delete all their configurations.\n\n"
+                                "WARNING: This will permanently remove all camera settings (FPS, resolution, sender names, etc.)\n\n"
                                 "Are you sure you want to proceed?", 
-                                "Cleanup All Cameras", 
+                                "Cleanup All Cameras & Configurations", 
                                 MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
                                 
                             if (result == IDYES) {
-                                LOG("Starting cleanup of all SpoutCam cameras...\n");
-                                int successCount = 0;
-                                int failCount = 0;
+                                LOG("Starting complete cleanup of all SpoutCam cameras and configurations...\n");
+                                int unregisterSuccessCount = 0;
+                                int unregisterFailCount = 0;
+                                int configDeletedCount = 0;
                                 
-                                // Unregister all 8 cameras
+                                // Unregister all 8 cameras and delete their configurations
                                 for (int i = 0; i < MAX_CAMERAS; i++) {
                                     LOG("Cleaning up SpoutCam%d...\n", i + 1);
+                                    
+                                    // Unregister the camera
                                     if (UnregisterCamera(i)) {
-                                        successCount++;
+                                        unregisterSuccessCount++;
                                         LOG("SpoutCam%d unregistered successfully\n", i + 1);
                                     } else {
-                                        failCount++;
+                                        unregisterFailCount++;
                                         LOG("Failed to unregister SpoutCam%d\n", i + 1);
+                                    }
+                                    
+                                    // Delete the camera configuration
+                                    if (HasCameraSettings(i)) {
+                                        DeleteCameraConfiguration(i);
+                                        configDeletedCount++;
                                     }
                                 }
                                 
@@ -487,16 +522,22 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                 RefreshCameraList(hListView);
                                 
                                 // Show summary
-                                char summaryMsg[256];
+                                char summaryMsg[512];
                                 sprintf_s(summaryMsg, 
-                                    "Cleanup complete!\n\nSuccessfully unregistered: %d cameras\nFailed to unregister: %d cameras\n\n"
-                                    "All SpoutCam registrations have been cleaned up.",
-                                    successCount, failCount);
-                                MessageBox(hDlg, summaryMsg, "Cleanup Complete", MB_OK | MB_ICONINFORMATION);
+                                    "Complete cleanup finished!\n\n"
+                                    "Camera Registrations:\n"
+                                    "  Successfully unregistered: %d cameras\n"
+                                    "  Failed to unregister: %d cameras\n\n"
+                                    "Camera Configurations:\n"
+                                    "  Deleted configurations: %d cameras\n\n"
+                                    "All SpoutCam registrations and configurations have been cleaned up.",
+                                    unregisterSuccessCount, unregisterFailCount, configDeletedCount);
+                                MessageBox(hDlg, summaryMsg, "Complete Cleanup Finished", MB_OK | MB_ICONINFORMATION);
                                 
-                                LOG("Cleanup complete: %d success, %d failed\n", successCount, failCount);
+                                LOG("Complete cleanup finished: %d unregistered, %d failed, %d configs deleted\n", 
+                                    unregisterSuccessCount, unregisterFailCount, configDeletedCount);
                             } else {
-                                LOG("Cleanup cancelled by user\n");
+                                LOG("Complete cleanup cancelled by user\n");
                             }
                         }
                         break;
