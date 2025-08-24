@@ -34,4 +34,5 @@
 #define IDC_CONFIGURE_CAMERA                    428
 #define IDC_REGISTER_CAMERA                     429
 #define IDC_UNREGISTER_CAMERA                   430
+#define IDC_CLEANUP                             431
 #define IDS_TITLE                               1015
