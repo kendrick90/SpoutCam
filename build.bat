@@ -160,9 +160,9 @@ if %ERRORLEVEL% equ 0 (
 
 :: Only check files relevant to current architecture being built
 if "%ARCH%"=="x64" (
-    set "FILES_TO_CHECK="binaries\SPOUTCAM\SpoutCam64\SpoutCam64.ax" "x64\Release\SpoutCam.ax" "x64\Release\SpoutCam64.ax""
+    set "FILES_TO_CHECK="binaries\SPOUTCAM\SpoutCam64\SpoutCam64.ax""
 ) else (
-    set "FILES_TO_CHECK="binaries\SPOUTCAM\SpoutCam32\SpoutCam32.ax" "Win32\Release\SpoutCam.ax" "Win32\Release\SpoutCam32.ax""
+    set "FILES_TO_CHECK="binaries\SPOUTCAM\SpoutCam32\SpoutCam32.ax""
 )
 
 for %%f in (%FILES_TO_CHECK%) do (
