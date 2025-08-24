@@ -391,7 +391,7 @@ HRESULT ShowFilterPropertyPageDirect(IBaseFilter *pFilter, HWND hwndParent)
 	{
 		hr = OleCreatePropertyFrameDirect(
 			hwndParent,             // Parent window
-			SpoutCamName,			// Caption for the dialog box
+			L"SpoutCam",            // Caption for the dialog box - DirectShow will append "Properties"
 			(IUnknown **)&pFilter,  // Pointer to the filter
 			pPage
 		);

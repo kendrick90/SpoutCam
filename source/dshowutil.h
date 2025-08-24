@@ -83,7 +83,7 @@ inline HRESULT ShowFilterPropertyPage(IBaseFilter *pFilter, HWND hwndParent)
 			hwndParent,             // Parent window
 			0,                      // x (Reserved)
 			0,                      // y (Reserved)
-			FilterInfo.achName,     // Caption for the dialog box
+			L"SpoutCam",            // Caption for the dialog box - DirectShow will append "Properties"
 			1,                      // Number of filters
 			(IUnknown **)&pFilter,  // Pointer to the filter 
 			caGUID.cElems,          // Number of property pages
