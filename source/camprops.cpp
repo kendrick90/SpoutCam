@@ -193,10 +193,6 @@ INT_PTR CSpoutCamProperties::OnReceiveMessage(HWND hwnd, UINT uMsg, WPARAM wPara
 					}
 					break;
 
-				case IDC_UNREGISTER_ALL:
-					// Unregister all SpoutCam cameras
-					UnregisterCameras();
-					break;
 
 				case IDC_ADD_CAMERA:
 					// Add a new camera tab
@@ -678,12 +674,15 @@ void CSpoutCamProperties::InitializeTabControl()
 		ShowWindow(hwndTab, SW_HIDE);
 	}
 	
-	// Hide Add/Remove camera buttons - managed by SpoutCamSettings now
+	// Hide Add/Remove camera buttons and Unregister All - managed by SpoutCamSettings now
 	HWND hwndAdd = GetDlgItem(this->m_Dlg, IDC_ADD_CAMERA);
 	if (hwndAdd) ShowWindow(hwndAdd, SW_HIDE);
 	
 	HWND hwndRemove = GetDlgItem(this->m_Dlg, IDC_REMOVE_CAMERA);  
 	if (hwndRemove) ShowWindow(hwndRemove, SW_HIDE);
+	
+	HWND hwndUnregisterAll = GetDlgItem(this->m_Dlg, IDC_UNREGISTER_ALL);
+	if (hwndUnregisterAll) ShowWindow(hwndUnregisterAll, SW_HIDE);
 
 	// Use the camera index from the filter instance
 	g_currentCameraTab = m_cameraIndex;
