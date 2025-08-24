@@ -36,7 +36,7 @@
 #include "dshowutil.h"
 
 // we need a LPCTSTR for the NAME() makros in debug mode
-#define SPOUTCAMNAME "SpoutCam"
+#define SPOUTCAMNAME "SpoutCam Settings"
 
 // Multiple camera support - configure how many cameras you want (1-8)
 #define MAX_SPOUT_CAMERAS 4
