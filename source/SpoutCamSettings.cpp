@@ -1,6 +1,6 @@
 //
-// SpoutCamSettings.exe - Camera Management Interface
-// Central interface for managing multiple SpoutCam instances
+// SpoutCamSettings.exe - SpoutCam Management Interface  
+// Individual camera registration and configuration
 //
 
 #include <windows.h>
@@ -10,7 +10,28 @@
 #include <iostream>
 #include <io.h>
 #include <fcntl.h>
+#include <stdarg.h>
+#include <string>
+#include <vector>
 #include "resource.h"
+
+// Utility function for basic logging
+void LogWithTimestamp(const char* format, ...) {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    printf("[%02d:%02d:%02d.%03d] ", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    
+    va_list args;
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+}
+
+#define LOG(...) LogWithTimestamp(__VA_ARGS__)
+
+// Cache for registered filters for performance
+std::vector<std::string> g_registeredFilters;
+bool g_filtersScanned = false;
 
 // Forward declarations
 INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
@@ -23,289 +44,125 @@ bool HasCameraSettings(int cameraIndex);
 void RefreshCameraList(HWND hListView);
 bool IsRunningAsAdmin();
 bool RestartAsAdmin();
-void SetupConsole();
-void ShowRegistrationTroubleshooting();
-bool DeleteRegistrySettings(int cameraIndex);
-void CleanupOrphanedCameras();
+void ScanRegisteredFilters();
+bool ReadStringFromRegistry(HKEY hKey, const char* subkey, const char* valuename, char* buffer, DWORD bufferSize);
+bool ReadDwordFromRegistry(HKEY hKey, const char* subkey, const char* valuename, DWORD* value);
 
-// External DLL functions for individual camera registration
-extern "C" {
-    typedef HRESULT (STDAPICALLTYPE *RegisterSingleSpoutCameraFunc)(int cameraIndex);
-    typedef HRESULT (STDAPICALLTYPE *UnregisterSingleSpoutCameraFunc)(int cameraIndex);
+// Function typedefs for DLL exports
+typedef HRESULT (STDAPICALLTYPE *RegisterSingleSpoutCameraFunc)(int cameraIndex);
+typedef HRESULT (STDAPICALLTYPE *UnregisterSingleSpoutCameraFunc)(int cameraIndex);
+
+HINSTANCE g_hInst;
+
+#define MAX_CAMERAS 8
+
+// Optimized function to scan registered DirectShow video capture filters
+void ScanRegisteredFilters()
+{
+    if (g_filtersScanned) {
+        return; // Use cached results
+    }
+    
+    g_registeredFilters.clear();
+    
+    // Direct registry access to CLSID_VideoInputDeviceCategory
+    const char* directShowPath = "SOFTWARE\\Classes\\CLSID\\{860BB310-5D01-11d0-BD3B-00A0C911CE86}\\Instance";
+    HKEY instanceKey;
+    
+    LONG result = RegOpenKeyExA(HKEY_LOCAL_MACHINE, directShowPath, 0, KEY_READ, &instanceKey);
+    if (result == ERROR_SUCCESS) {
+        DWORD subkeyCount = 0;
+        DWORD maxSubkeyLen = 0;
+        result = RegQueryInfoKeyA(instanceKey, nullptr, nullptr, nullptr, &subkeyCount, &maxSubkeyLen, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+        
+        if (result == ERROR_SUCCESS) {
+            char* subkeyName = new char[maxSubkeyLen + 1];
+            
+            for (DWORD i = 0; i < subkeyCount; i++) {
+                DWORD subkeyNameLen = maxSubkeyLen + 1;
+                if (RegEnumKeyExA(instanceKey, i, subkeyName, &subkeyNameLen, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
+                    HKEY filterKey;
+                    if (RegOpenKeyExA(instanceKey, subkeyName, 0, KEY_READ, &filterKey) == ERROR_SUCCESS) {
+                        char friendlyName[256];
+                        if (ReadStringFromRegistry(HKEY_LOCAL_MACHINE, 
+                                                 (std::string(directShowPath) + "\\" + subkeyName).c_str(), 
+                                                 "FriendlyName", friendlyName, sizeof(friendlyName))) {
+                            g_registeredFilters.push_back(std::string(friendlyName));
+                        }
+                        RegCloseKey(filterKey);
+                    }
+                }
+            }
+            delete[] subkeyName;
+        }
+        RegCloseKey(instanceKey);
+    }
+    
+    g_filtersScanned = true;
 }
 
-// Include required libraries
-#pragma comment(lib, "comctl32.lib")
-#pragma comment(lib, "advapi32.lib")
+// Setup console for debug output
+void SetupConsole() {
+    AllocConsole();
+    freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
+    freopen_s((FILE**)stderr, "CONOUT$", "w", stderr);
+    freopen_s((FILE**)stdin, "CONIN$", "r", stdin);
+    std::cout.clear();
+    std::cin.clear();
+    std::cerr.clear();
+}
 
-// Registry utility function - simplified implementation  
-bool ReadDwordFromRegistry(HKEY hKey, const char* subkey, const char* valuename, DWORD* pValue)
+bool ReadStringFromRegistry(HKEY hKey, const char* subkey, const char* valuename, char* buffer, DWORD bufferSize)
 {
     HKEY key;
-    if (RegOpenKeyExA(hKey, subkey, 0, KEY_READ, &key) != ERROR_SUCCESS) {
+    LONG openResult = RegOpenKeyExA(hKey, subkey, 0, KEY_READ, &key);
+    if (openResult != ERROR_SUCCESS) {
         return false;
     }
     
-    DWORD type = REG_DWORD;
-    DWORD size = sizeof(DWORD);
-    bool result = (RegQueryValueExA(key, valuename, nullptr, &type, (LPBYTE)pValue, &size) == ERROR_SUCCESS);
+    DWORD type = REG_SZ;
+    DWORD size = bufferSize;
+    LONG queryResult = RegQueryValueExA(key, valuename, nullptr, &type, (LPBYTE)buffer, &size);
+    bool result = (queryResult == ERROR_SUCCESS);
     
     RegCloseKey(key);
     return result;
 }
 
-#define MAX_CAMERAS 8
-
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+bool ReadDwordFromRegistry(HKEY hKey, const char* subkey, const char* valuename, DWORD* value)
 {
-    SetupConsole();
-    
-    // Check if running as administrator
-    if (!IsRunningAsAdmin()) {
-        printf("Requesting administrator privileges...\n");
-        
-        // Automatically restart with admin privileges
-        if (RestartAsAdmin()) {
-            return 0; // Exit this instance
-        } else {
-            printf("Failed to obtain administrator privileges\n");
-            MessageBox(nullptr, "SpoutCam Settings requires administrator privileges but failed to restart.\n\nPlease run SpoutCamSettings as administrator manually.", "Admin Required", MB_OK | MB_ICONERROR);
-            return 1;
-        }
+    HKEY key;
+    LONG openResult = RegOpenKeyExA(hKey, subkey, 0, KEY_READ, &key);
+    if (openResult != ERROR_SUCCESS) {
+        return false;
     }
     
-    printf("Running with administrator privileges [OK]\n\n");
+    DWORD type = REG_DWORD;
+    DWORD size = sizeof(DWORD);
+    LONG queryResult = RegQueryValueExA(key, valuename, nullptr, &type, (LPBYTE)value, &size);
+    bool result = (queryResult == ERROR_SUCCESS);
     
-    // Initialize common controls
-    INITCOMMONCONTROLSEX icex;
-    icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
-    icex.dwICC = ICC_LISTVIEW_CLASSES;
-    if (!InitCommonControlsEx(&icex)) {
-        MessageBox(nullptr, "Failed to initialize common controls", "Error", MB_OK | MB_ICONERROR);
-        return 1;
-    }
-
-    // Create main settings dialog
-    INT_PTR result = DialogBox(hInstance, MAKEINTRESOURCE(IDD_SETTINGS_MAIN), nullptr, SettingsDialogProc);
-    
-    if (result == -1) {
-        char errorMsg[256];
-        DWORD error = GetLastError();
-        sprintf_s(errorMsg, "DialogBox failed with error: %lu", error);
-        MessageBox(nullptr, errorMsg, "Error", MB_OK | MB_ICONERROR);
-        return 1;
-    }
-    return 0;
-}
-
-INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    static HWND hListView = nullptr;
-    
-    switch (message)
-    {
-    case WM_INITDIALOG:
-        {
-            // Set dialog title
-            SetWindowText(hDlg, "SpoutCam Settings");
-            
-            // Center dialog on screen
-            RECT rect;
-            GetWindowRect(hDlg, &rect);
-            int width = rect.right - rect.left;
-            int height = rect.bottom - rect.top;
-            int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
-            int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
-            SetWindowPos(hDlg, HWND_TOP, x, y, 0, 0, SWP_NOSIZE);
-            
-            // Initialize list view
-            hListView = GetDlgItem(hDlg, IDC_CAMERA_LIST);
-            if (hListView) {
-                // Set up list view columns
-                LVCOLUMN lvc = {0};
-                lvc.mask = LVCF_TEXT | LVCF_WIDTH;
-                
-                lvc.pszText = "Camera";
-                lvc.cx = 100;
-                ListView_InsertColumn(hListView, 0, &lvc);
-                
-                lvc.pszText = "Status";
-                lvc.cx = 100;
-                ListView_InsertColumn(hListView, 1, &lvc);
-                
-                lvc.pszText = "Settings";
-                lvc.cx = 100;
-                ListView_InsertColumn(hListView, 2, &lvc);
-                
-                // Set full row select
-                ListView_SetExtendedListViewStyle(hListView, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
-                
-                PopulateCameraList(hListView);
-            }
-            
-            return TRUE;
-        }
-        
-    case WM_COMMAND:
-        {
-            int wmId = LOWORD(wParam);
-            switch (wmId)
-            {
-            case IDC_CONFIGURE_CAMERA:
-                {
-                    int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
-                    if (selected != -1) {
-                        OpenCameraProperties(selected);
-                    } else {
-                        MessageBox(hDlg, "Please select a camera to configure.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
-                    }
-                }
-                break;
-                
-            case IDC_REGISTER_CAMERA:
-                {
-                    int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
-                    if (selected != -1) {
-                        printf("\n*** STARTING REGISTRATION PROCESS ***\n");
-                        if (RegisterCamera(selected)) {
-                            printf("Registration reported success - refreshing list...\n");
-                            Sleep(1000); // Give system time to update registry
-                            RefreshCameraList(hListView);
-                        } else {
-                            printf("Registration reported failure\n");
-                        }
-                        printf("*** REGISTRATION PROCESS COMPLETE ***\n\n");
-                    } else {
-                        MessageBox(hDlg, "Please select a camera to register.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
-                    }
-                }
-                break;
-                
-            case IDC_UNREGISTER_CAMERA:
-                {
-                    int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
-                    if (selected != -1) {
-                        // Confirm unregistration
-                        char confirmMsg[256];
-                        sprintf_s(confirmMsg, "Are you sure you want to unregister SpoutCam%d?\n\nThis will make it unavailable in video applications.", selected + 1);
-                        int result = MessageBox(hDlg, confirmMsg, "Confirm Unregistration", MB_YESNO | MB_ICONQUESTION);
-                        if (result == IDYES) {
-                            printf("\n*** STARTING UNREGISTRATION PROCESS ***\n");
-                            if (UnregisterCamera(selected)) {
-                                printf("Unregistration reported success - refreshing list...\n");
-                                Sleep(1000); // Give system time to update registry
-                                RefreshCameraList(hListView);
-                            } else {
-                                printf("Unregistration reported failure\n");
-                            }
-                            printf("*** UNREGISTRATION PROCESS COMPLETE ***\n\n");
-                        }
-                    } else {
-                        MessageBox(hDlg, "Please select a camera to unregister.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
-                    }
-                }
-                break;
-                
-            case IDC_REFRESH:
-                RefreshCameraList(hListView);
-                break;
-                
-            case IDC_CLEANUP:
-                {
-                    int result = MessageBox(hDlg, "This will clean up orphaned registry settings for cameras 2-8.\n\nDo you want to continue?", "Cleanup Confirmation", MB_YESNO | MB_ICONQUESTION);
-                    if (result == IDYES) {
-                        CleanupOrphanedCameras();
-                        RefreshCameraList(hListView);
-                    }
-                }
-                break;
-                
-            case IDCANCEL:
-            case IDOK:
-                EndDialog(hDlg, LOWORD(wParam));
-                return TRUE;
-            }
-        }
-        break;
-        
-    case WM_NOTIFY:
-        {
-            LPNMHDR pnmh = (LPNMHDR)lParam;
-            if (pnmh->idFrom == IDC_CAMERA_LIST && pnmh->code == NM_DBLCLK) {
-                // Double-click to configure
-                int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
-                if (selected != -1) {
-                    OpenCameraProperties(selected);
-                }
-            }
-        }
-        break;
-    }
-    return FALSE;
-}
-
-void PopulateCameraList(HWND hListView)
-{
-    ListView_DeleteAllItems(hListView);
-    
-    for (int i = 0; i < MAX_CAMERAS; i++) {
-        LVITEM lvi = {0};
-        lvi.mask = LVIF_TEXT;
-        lvi.iItem = i;
-        lvi.iSubItem = 0;
-        
-        // Camera name
-        char cameraName[32];
-        sprintf_s(cameraName, "SpoutCam%d", i + 1);
-        lvi.pszText = cameraName;
-        
-        int itemIndex = ListView_InsertItem(hListView, &lvi);
-        
-        // Status column
-        bool registered = IsCameraRegistered(i);
-        ListView_SetItemText(hListView, itemIndex, 1, registered ? "Registered" : "Not Registered");
-        
-        // Settings column  
-        bool hasSettings = HasCameraSettings(i);
-        ListView_SetItemText(hListView, itemIndex, 2, hasSettings ? "Configured" : "Default");
-    }
-}
-
-void RefreshCameraList(HWND hListView)
-{
-    PopulateCameraList(hListView);
+    RegCloseKey(key);
+    return result;
 }
 
 bool IsCameraRegistered(int cameraIndex)
 {
-    // Use PowerShell to check DirectShow filter registration
-    char command[1024];
-    sprintf_s(command, 
-        "powershell -Command "
-        "$found = $false; "
-        "Get-ChildItem 'HKLM:\\SOFTWARE\\Classes\\CLSID\\{083863F1-70DE-11D0-BD40-00A0C911CE86}\\Instance' -ErrorAction SilentlyContinue | "
-        "ForEach-Object { "
-            "$friendlyName = Get-ItemProperty $_.PSPath -Name 'FriendlyName' -ErrorAction SilentlyContinue; "
-            "if ($friendlyName.FriendlyName -match 'SpoutCam%d') { "
-                "$found = $true "
-            "} "
-        "}; "
-        "if ($found) { Write-Host 'REGISTERED' } else { Write-Host 'NOT_REGISTERED' }"
-        , cameraIndex + 1  // Display names are 1-based
-    );
-    
-    FILE* pipe = _popen(command, "r");
-    if (!pipe) return false;
-    
-    char result[256];
-    bool registered = false;
-    
-    if (fgets(result, sizeof(result), pipe)) {
-        registered = (strstr(result, "REGISTERED") != nullptr);
+    // Use cached filter scan results with correct SpoutCam naming
+    char searchName[32];
+    if (cameraIndex == 0) {
+        strcpy_s(searchName, "SpoutCam");  // First camera has no number
+    } else {
+        sprintf_s(searchName, "SpoutCam%d", cameraIndex + 1);  // SpoutCam2, SpoutCam3, etc.
     }
     
-    _pclose(pipe);
-    return registered;
+    for (const auto& filter : g_registeredFilters) {
+        if (filter.find(searchName) != std::string::npos) {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 bool HasCameraSettings(int cameraIndex) 
@@ -321,77 +178,76 @@ bool HasCameraSettings(int cameraIndex)
     }
     
     // Check if any settings exist
-    return ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "fps", &testValue) ||
-           ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "resolution", &testValue) ||
-           ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "mirror", &testValue);
+    bool hasFps = ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "fps", &testValue);
+    bool hasResolution = ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "resolution", &testValue);
+    bool hasMirror = ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "mirror", &testValue);
+    
+    return (hasFps || hasResolution || hasMirror);
 }
 
-void OpenCameraProperties(int cameraIndex)
+void RefreshCameraList(HWND hListView)
 {
-    // Get the directory where this executable is located
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
-    if (lastSlash) *lastSlash = 0;
+    g_filtersScanned = false; // Force rescan
+    ScanRegisteredFilters();
+    PopulateCameraList(hListView);
+}
 
-    // Detect architecture and build path to properties
-    SYSTEM_INFO sysInfo;
-    GetNativeSystemInfo(&sysInfo);
-    bool is64BitWindows = (sysInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64);
+void PopulateCameraList(HWND hListView)
+{
+    // Scan for registered filters first
+    ScanRegisteredFilters();
     
-    const wchar_t* subDir = is64BitWindows ? L"SpoutCam64" : L"SpoutCam32";
+    // Clear existing items
+    ListView_DeleteAllItems(hListView);
     
-    wchar_t cmdPath[MAX_PATH];
-    swprintf_s(cmdPath, MAX_PATH, L"%s\\%s\\SpoutCamProperties.cmd", exePath, subDir);
-    
-    // Pass camera index as parameter to properties dialog
-    wchar_t params[32];
-    swprintf_s(params, L"%d", cameraIndex);
-    
-    // Check if camera is registered before opening properties
-    if (!IsCameraRegistered(cameraIndex)) {
-        char warningMsg[512];
-        sprintf_s(warningMsg, 
-            "SpoutCam%d is not currently registered.\n\n"
-            "You can still configure its settings, but the camera won't appear in video applications until it's registered.\n\n"
-            "Do you want to open the properties anyway?", 
-            cameraIndex + 1);
+    // Add each camera to the list
+    for (int i = 0; i < MAX_CAMERAS; i++) {
+        LVITEM lvi = {0};
+        lvi.mask = LVIF_TEXT;
+        lvi.iItem = i;
+        lvi.iSubItem = 0;
         
-        int result = MessageBox(nullptr, warningMsg, "Camera Not Registered", MB_YESNO | MB_ICONQUESTION);
-        if (result != IDYES) {
-            return;
-        }
+        char cameraName[32];
+        sprintf_s(cameraName, "SpoutCam%d", i + 1);
+        lvi.pszText = cameraName;
+        
+        int itemIndex = ListView_InsertItem(hListView, &lvi);
+        
+        // Set registration status
+        bool registered = IsCameraRegistered(i);
+        ListView_SetItemText(hListView, itemIndex, 1, (LPSTR)(registered ? "Registered" : "Not Registered"));
+        
+        // Set configuration status
+        bool hasSettings = HasCameraSettings(i);
+        ListView_SetItemText(hListView, itemIndex, 2, (LPSTR)(hasSettings ? "Configured" : "Default"));
     }
-    
-    // Open the camera properties with camera index parameter
-    ShellExecuteW(nullptr, L"runas", cmdPath, params, nullptr, SW_SHOW);
 }
 
 bool RegisterCamera(int cameraIndex)
 {
-    // Get path to SpoutCam DLL
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
-    if (lastSlash) *lastSlash = 0;
-
-    // Detect architecture
-    SYSTEM_INFO sysInfo;
-    GetNativeSystemInfo(&sysInfo);
-    bool is64BitWindows = (sysInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64);
+    // Detect process architecture
+#ifdef _WIN64
+    bool is64BitProcess = true;
+#else
+    bool is64BitProcess = false;
+#endif
     
-    const wchar_t* subDir = is64BitWindows ? L"SpoutCam64" : L"SpoutCam32";
-    const wchar_t* dllName = is64BitWindows ? L"SpoutCam64.ax" : L"SpoutCam32.ax";
+    const wchar_t* subDir = is64BitProcess ? L"SpoutCam64" : L"SpoutCam32";
+    const wchar_t* dllName = is64BitProcess ? L"SpoutCam64.ax" : L"SpoutCam32.ax";
     
     wchar_t dllPath[MAX_PATH];
+    wchar_t exePath[MAX_PATH];
+    
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+    if (lastSlash) *lastSlash = L'\0';
+    
     swprintf_s(dllPath, MAX_PATH, L"%s\\%s\\%s", exePath, subDir, dllName);
     
-    // Load the DLL and get the registration function
+    LOG("Loading SpoutCam DLL: %S\n", dllPath);
     HMODULE hDll = LoadLibraryW(dllPath);
     if (!hDll) {
-        char errorMsg[512];
-        sprintf_s(errorMsg, "Failed to load SpoutCam DLL:\n%ls\n\nError: %lu", dllPath, GetLastError());
-        MessageBox(nullptr, errorMsg, "Registration Error", MB_OK | MB_ICONERROR);
+        LOG("ERROR: Failed to load DLL, error code: %lu\n", GetLastError());
         return false;
     }
     
@@ -399,57 +255,42 @@ bool RegisterCamera(int cameraIndex)
         (RegisterSingleSpoutCameraFunc)GetProcAddress(hDll, "RegisterSingleSpoutCamera");
     
     if (!registerFunc) {
+        LOG("ERROR: Failed to find RegisterSingleSpoutCamera function\n");
         FreeLibrary(hDll);
-        MessageBox(nullptr, "Failed to find RegisterSingleSpoutCamera function in DLL", "Registration Error", MB_OK | MB_ICONERROR);
         return false;
     }
     
     HRESULT hr = registerFunc(cameraIndex);
-    FreeLibrary(hDll);
+    LOG("Registration result: 0x%08X %s\n", hr, SUCCEEDED(hr) ? "(SUCCESS)" : "(FAILED)");
     
-    if (SUCCEEDED(hr)) {
-        char successMsg[256];
-        sprintf_s(successMsg, "Successfully registered SpoutCam%d\n\nThe camera is now available in video applications.", cameraIndex + 1);
-        MessageBox(nullptr, successMsg, "Registration Success", MB_OK | MB_ICONINFORMATION);
-        return true;
-    } else {
-        char errorMsg[256];
-        sprintf_s(errorMsg, "Failed to register SpoutCam%d\n\nError code: 0x%08X", cameraIndex + 1, hr);
-        MessageBox(nullptr, errorMsg, "Registration Failed", MB_OK | MB_ICONERROR);
-        
-        // Show troubleshooting help for common registration failures
-        if (hr == 0x80070005) { // Access denied
-            ShowRegistrationTroubleshooting();
-        }
-        return false;
-    }
+    FreeLibrary(hDll);
+    return SUCCEEDED(hr);
 }
 
 bool UnregisterCamera(int cameraIndex)
 {
-    // Get path to SpoutCam DLL
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
-    if (lastSlash) *lastSlash = 0;
-
-    // Detect architecture
-    SYSTEM_INFO sysInfo;
-    GetNativeSystemInfo(&sysInfo);
-    bool is64BitWindows = (sysInfo.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64);
+    // Detect process architecture
+#ifdef _WIN64
+    bool is64BitProcess = true;
+#else
+    bool is64BitProcess = false;
+#endif
     
-    const wchar_t* subDir = is64BitWindows ? L"SpoutCam64" : L"SpoutCam32";
-    const wchar_t* dllName = is64BitWindows ? L"SpoutCam64.ax" : L"SpoutCam32.ax";
+    const wchar_t* subDir = is64BitProcess ? L"SpoutCam64" : L"SpoutCam32";
+    const wchar_t* dllName = is64BitProcess ? L"SpoutCam64.ax" : L"SpoutCam32.ax";
     
     wchar_t dllPath[MAX_PATH];
+    wchar_t exePath[MAX_PATH];
+    
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+    if (lastSlash) *lastSlash = L'\0';
+    
     swprintf_s(dllPath, MAX_PATH, L"%s\\%s\\%s", exePath, subDir, dllName);
     
-    // Load the DLL and get the unregistration function
     HMODULE hDll = LoadLibraryW(dllPath);
     if (!hDll) {
-        char errorMsg[512];
-        sprintf_s(errorMsg, "Failed to load SpoutCam DLL:\n%ls\n\nError: %lu", dllPath, GetLastError());
-        MessageBox(nullptr, errorMsg, "Unregistration Error", MB_OK | MB_ICONERROR);
+        LOG("ERROR: Failed to load DLL for unregistration\n");
         return false;
     }
     
@@ -457,159 +298,259 @@ bool UnregisterCamera(int cameraIndex)
         (UnregisterSingleSpoutCameraFunc)GetProcAddress(hDll, "UnregisterSingleSpoutCamera");
     
     if (!unregisterFunc) {
+        LOG("ERROR: Failed to find UnregisterSingleSpoutCamera function\n");
         FreeLibrary(hDll);
-        MessageBox(nullptr, "Failed to find UnregisterSingleSpoutCamera function in DLL", "Unregistration Error", MB_OK | MB_ICONERROR);
         return false;
     }
     
     HRESULT hr = unregisterFunc(cameraIndex);
-    FreeLibrary(hDll);
+    LOG("Unregistration result: 0x%08X %s\n", hr, SUCCEEDED(hr) ? "(SUCCESS)" : "(FAILED)");
     
-    if (SUCCEEDED(hr)) {
-        char successMsg[256];
-        sprintf_s(successMsg, "Successfully unregistered SpoutCam%d\n\nThe camera is no longer available in video applications.", cameraIndex + 1);
-        MessageBox(nullptr, successMsg, "Unregistration Success", MB_OK | MB_ICONINFORMATION);
-        return true;
-    } else {
-        char errorMsg[256];
-        sprintf_s(errorMsg, "Failed to unregister SpoutCam%d\n\nError code: 0x%08X", cameraIndex + 1, hr);
-        MessageBox(nullptr, errorMsg, "Unregistration Failed", MB_OK | MB_ICONERROR);
-        
-        // Show troubleshooting help for common unregistration failures
-        if (hr == 0x80070005) { // Access denied
-            ShowRegistrationTroubleshooting();
-        }
-        return false;
-    }
+    FreeLibrary(hDll);
+    return SUCCEEDED(hr);
 }
 
-// Console setup for debug output
-void SetupConsole() 
+void OpenCameraProperties(int cameraIndex)
 {
-    if (AllocConsole()) {
-        freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
-        freopen_s((FILE**)stderr, "CONOUT$", "w", stderr);
-        freopen_s((FILE**)stdin, "CONIN$", "r", stdin);
-        
-        std::cout.clear();
-        std::cerr.clear();
-        std::cin.clear();
-        
-        SetConsoleTitle("SpoutCam Settings - Debug Console");
-        printf("SpoutCam Settings Debug Console\n");
-        printf("==============================\n\n");
+    // Detect process architecture
+#ifdef _WIN64
+    bool is64BitProcess = true;
+#else
+    bool is64BitProcess = false;
+#endif
+    
+    const wchar_t* subDir = is64BitProcess ? L"SpoutCam64" : L"SpoutCam32";
+    
+    wchar_t cmdPath[MAX_PATH];
+    wchar_t exePath[MAX_PATH];
+    
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+    if (lastSlash) *lastSlash = L'\0';
+    
+    swprintf_s(cmdPath, MAX_PATH, L"%s\\%s\\SpoutCamProperties.cmd", exePath, subDir);
+    
+    wchar_t parameters[64];
+    swprintf_s(parameters, 64, L"%d", cameraIndex);
+    
+    SHELLEXECUTEINFOW sei = {0};
+    sei.cbSize = sizeof(SHELLEXECUTEINFOW);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = L"runas";
+    sei.lpFile = cmdPath;
+    sei.lpParameters = parameters;
+    sei.nShow = SW_SHOW;
+    
+    if (!ShellExecuteExW(&sei)) {
+        MessageBox(nullptr, "Failed to open camera properties", "Error", MB_OK | MB_ICONERROR);
     }
 }
 
-// Admin privilege checking functions
-bool IsRunningAsAdmin() 
+bool IsRunningAsAdmin()
 {
     BOOL isAdmin = FALSE;
-    SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
     PSID adminGroup = NULL;
+    SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
     
     if (AllocateAndInitializeSid(&ntAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, 
                                 DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &adminGroup)) {
         CheckTokenMembership(NULL, adminGroup, &isAdmin);
         FreeSid(adminGroup);
     }
+    
     return isAdmin == TRUE;
 }
 
 bool RestartAsAdmin()
 {
     wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
     
-    printf("Restarting with administrator privileges...\n");
+    SHELLEXECUTEINFOW sei = {0};
+    sei.cbSize = sizeof(SHELLEXECUTEINFOW);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = L"runas";
+    sei.lpFile = exePath;
+    sei.nShow = SW_SHOW;
     
-    HINSTANCE result = ShellExecuteW(nullptr, L"runas", exePath, nullptr, nullptr, SW_SHOW);
-    
-    if ((INT_PTR)result > 32) {
-        printf("Successfully launched elevated instance\n");
-        return true;
-    } else {
-        printf("Failed to restart as admin (error %d)\n", (int)(INT_PTR)result);
-        return false;
-    }
+    return ShellExecuteExW(&sei) != FALSE;
 }
 
-void ShowRegistrationTroubleshooting()
+INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    char message[1024];
-    strcpy_s(message, "Camera registration failed\n\n");
-    strcat_s(message, "Possible solutions:\n");
-    strcat_s(message, "1. Close all video applications (OBS, etc.)\n");
-    strcat_s(message, "2. Make sure no SpoutCam filters are in use\n");
-    strcat_s(message, "3. Try running as administrator again\n");
-    strcat_s(message, "4. Restart Windows and try again\n\n");
-    strcat_s(message, "You can also try the manual method:\n");
-    strcat_s(message, "Use SpoutCamProperties.cmd for registration");
+    static HWND hListView = nullptr;
     
-    MessageBox(nullptr, message, "Registration Help", MB_OK | MB_ICONINFORMATION);
-}
-
-bool DeleteRegistrySettings(int cameraIndex)
-{
-    char keyName[256];
-    if (cameraIndex == 0) {
-        strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
-    } else {
-        sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
-    }
-    
-    printf("Deleting registry settings: %s\n", keyName);
-    
-    HKEY parentKey;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Leading Edge", 0, KEY_WRITE, &parentKey) == ERROR_SUCCESS) {
-        const char* subkeyName = (cameraIndex == 0) ? "SpoutCam" : (keyName + strlen("Software\\Leading Edge\\"));
-        LONG result = RegDeleteKeyA(parentKey, subkeyName);
-        RegCloseKey(parentKey);
-        
-        if (result == ERROR_SUCCESS || result == ERROR_FILE_NOT_FOUND) {
-            printf("  -> Successfully deleted registry settings\n");
-            return true;
-        } else {
-            printf("  -> Failed to delete registry key (error %ld)\n", result);
-            return false;
-        }
-    }
-    return false;
-}
-
-void CleanupOrphanedCameras()
-{
-    printf("\n=== Comprehensive cleanup of SpoutCam ===\n");
-    
-    // Clean up registry settings for cameras 2-8 (potential orphaned ones)
-    printf("Cleaning up potentially orphaned registry settings...\n");
-    bool registryCleanupSuccess = true;
-    for (int i = 1; i < 8; i++) {
-        bool hasSettings = HasCameraSettings(i);
-        if (hasSettings) {
-            printf("Cleaning up SpoutCam%d registry settings...\n", i + 1);
-            if (!DeleteRegistrySettings(i)) {
-                registryCleanupSuccess = false;
+    switch (message) {
+        case WM_INITDIALOG:
+            {
+                g_hInst = (HINSTANCE)GetWindowLongPtr(hDlg, GWLP_HINSTANCE);
+                
+                // Get ListView handle
+                hListView = GetDlgItem(hDlg, IDC_CAMERA_LIST);
+                
+                // Set up ListView columns
+                LVCOLUMN lvc = {0};
+                lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+                lvc.cx = 100;
+                lvc.pszText = (LPSTR)"Camera";
+                ListView_InsertColumn(hListView, 0, &lvc);
+                
+                lvc.cx = 120;
+                lvc.pszText = (LPSTR)"Status";
+                ListView_InsertColumn(hListView, 1, &lvc);
+                
+                lvc.cx = 100;
+                lvc.pszText = (LPSTR)"Settings";
+                ListView_InsertColumn(hListView, 2, &lvc);
+                
+                // Set ListView to report style and enable selection
+                ListView_SetExtendedListViewStyle(hListView, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+                
+                // Populate the camera list
+                RefreshCameraList(hListView);
+                
+                return (INT_PTR)TRUE;
             }
+            
+        case WM_COMMAND:
+            {
+                int wmId = LOWORD(wParam);
+                
+                switch (wmId) {
+                    case IDC_REGISTER_CAMERA:
+                        {
+                            int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
+                            if (selected != -1) {
+                                if (RegisterCamera(selected)) {
+                                    g_filtersScanned = false; // Force rescan
+                                    RefreshCameraList(hListView);
+                                    LOG("Camera %d registered successfully\n", selected + 1);
+                                } else {
+                                    LOG("Failed to register camera %d\n", selected + 1);
+                                }
+                            } else {
+                                MessageBox(hDlg, "Please select a camera to register.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
+                            }
+                        }
+                        break;
+                        
+                    case IDC_UNREGISTER_CAMERA:
+                        {
+                            int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
+                            if (selected != -1) {
+                                if (UnregisterCamera(selected)) {
+                                    g_filtersScanned = false; // Force rescan
+                                    RefreshCameraList(hListView);
+                                    LOG("Camera %d unregistered successfully\n", selected + 1);
+                                } else {
+                                    LOG("Failed to unregister camera %d\n", selected + 1);
+                                }
+                            } else {
+                                MessageBox(hDlg, "Please select a camera to unregister.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
+                            }
+                        }
+                        break;
+                        
+                    case IDC_REFRESH:
+                        g_filtersScanned = false;
+                        RefreshCameraList(hListView);
+                        break;
+                        
+                    case IDC_CLEANUP:
+                        {
+                            // Cleanup orphaned camera registrations for all 8 cameras
+                            int result = MessageBox(hDlg, 
+                                "This will unregister ALL SpoutCam cameras (1-8) to clean up orphaned registrations.\n\n"
+                                "Are you sure you want to proceed?", 
+                                "Cleanup All Cameras", 
+                                MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+                                
+                            if (result == IDYES) {
+                                LOG("Starting cleanup of all SpoutCam cameras...\n");
+                                int successCount = 0;
+                                int failCount = 0;
+                                
+                                // Unregister all 8 cameras
+                                for (int i = 0; i < MAX_CAMERAS; i++) {
+                                    LOG("Cleaning up SpoutCam%d...\n", i + 1);
+                                    if (UnregisterCamera(i)) {
+                                        successCount++;
+                                        LOG("SpoutCam%d unregistered successfully\n", i + 1);
+                                    } else {
+                                        failCount++;
+                                        LOG("Failed to unregister SpoutCam%d\n", i + 1);
+                                    }
+                                }
+                                
+                                // Force refresh to show updated status
+                                g_filtersScanned = false;
+                                RefreshCameraList(hListView);
+                                
+                                // Show summary
+                                char summaryMsg[256];
+                                sprintf_s(summaryMsg, 
+                                    "Cleanup complete!\n\nSuccessfully unregistered: %d cameras\nFailed to unregister: %d cameras\n\n"
+                                    "All SpoutCam registrations have been cleaned up.",
+                                    successCount, failCount);
+                                MessageBox(hDlg, summaryMsg, "Cleanup Complete", MB_OK | MB_ICONINFORMATION);
+                                
+                                LOG("Cleanup complete: %d success, %d failed\n", successCount, failCount);
+                            } else {
+                                LOG("Cleanup cancelled by user\n");
+                            }
+                        }
+                        break;
+                        
+                    case IDC_CONFIGURE_CAMERA:
+                        {
+                            int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
+                            if (selected != -1) {
+                                OpenCameraProperties(selected);
+                            } else {
+                                MessageBox(hDlg, "Please select a camera to configure.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
+                            }
+                        }
+                        break;
+                        
+                    case IDCANCEL:
+                    case IDOK:
+                        EndDialog(hDlg, LOWORD(wParam));
+                        return (INT_PTR)TRUE;
+                }
+            }
+            break;
+    }
+    
+    return (INT_PTR)FALSE;
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+{
+    SetupConsole();
+    LOG("SpoutCam Settings - Camera Management Interface\n");
+    
+    // Check if running as administrator
+    if (!IsRunningAsAdmin()) {
+        LOG("Requesting administrator privileges...\n");
+        if (RestartAsAdmin()) {
+            return 0; // Exit this instance
+        } else {
+            MessageBox(nullptr, "SpoutCam Settings requires administrator privileges.", "Admin Required", MB_OK | MB_ICONERROR);
+            return 1;
         }
     }
     
-    char message[512];
-    if (registryCleanupSuccess) {
-        strcpy_s(message, "Cleanup completed successfully!\n\n");
-        strcat_s(message, "[OK] Orphaned registry settings cleaned up\n\n");
-        strcat_s(message, "You can now register individual cameras as needed.");
-        MessageBox(nullptr, message, "Cleanup Complete", MB_OK | MB_ICONINFORMATION);
-    } else {
-        strcpy_s(message, "Cleanup had some issues.\n\n");
-        strcat_s(message, "Some registry settings couldn't be cleaned.\n");
-        strcat_s(message, "Check console for details.");
-        MessageBox(nullptr, message, "Cleanup Issues", MB_OK | MB_ICONWARNING);
+    // Initialize common controls
+    INITCOMMONCONTROLSEX icex;
+    icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+    icex.dwICC = ICC_LISTVIEW_CLASSES;
+    if (!InitCommonControlsEx(&icex)) {
+        MessageBox(nullptr, "Failed to initialize common controls", "Error", MB_OK | MB_ICONERROR);
+        return 1;
     }
-}
-
-// Alternative main function for console builds
-int main()
-{
-    return WinMain(GetModuleHandle(nullptr), nullptr, GetCommandLineA(), SW_SHOWNORMAL);
+    
+    // Launch the settings dialog
+    DialogBox(hInstance, MAKEINTRESOURCE(IDD_SETTINGS_MAIN), nullptr, SettingsDialogProc);
+    
+    return 0;
 }
