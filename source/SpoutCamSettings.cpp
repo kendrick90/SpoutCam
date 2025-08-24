@@ -122,6 +122,18 @@ void DeleteCameraConfiguration(const char* cameraName);
 void DeleteLegacyCameraConfiguration(int cameraIndex);
 bool IsCameraRegistered(int cameraIndex);
 bool HasCameraSettings(int cameraIndex);
+std::string GenerateDefaultCameraName();
+
+// Camera creation result codes
+enum CameraCreationResult {
+    CAMERA_CREATE_SUCCESS = 0,
+    CAMERA_CREATE_INVALID_NAME = 1,
+    CAMERA_CREATE_NAME_EXISTS = 2,
+    CAMERA_CREATE_MAX_REACHED = 3,
+    CAMERA_CREATE_REGISTRY_ERROR = 4
+};
+
+CameraCreationResult CreateNewCameraEx(const char* name);
 
 // Function typedefs for DLL exports
 typedef HRESULT (STDAPICALLTYPE *RegisterSingleSpoutCameraFunc)(int cameraIndex);
@@ -409,20 +421,20 @@ int FindAvailableSlot()
     return -1; // No slots available
 }
 
-// Create a new camera with the given name
-bool CreateNewCamera(const char* name)
+// Enhanced camera creation with detailed error reporting
+CameraCreationResult CreateNewCameraEx(const char* name)
 {
     // Validate name
     if (!name || strlen(name) == 0 || strlen(name) > 64) {
         LOG("Invalid camera name\n");
-        return false;
+        return CAMERA_CREATE_INVALID_NAME;
     }
     
     // Check if name already exists
     for (const auto& camera : g_dynamicCameras) {
         if (camera.name == name) {
             LOG("Camera name '%s' already exists\n", name);
-            return false;
+            return CAMERA_CREATE_NAME_EXISTS;
         }
     }
     
@@ -430,7 +442,7 @@ bool CreateNewCamera(const char* name)
     int availableSlot = FindAvailableSlot();
     if (availableSlot == -1) {
         LOG("No available slots for new camera (maximum %d cameras supported)\n", MAX_DYNAMIC_CAMERAS);
-        return false;
+        return CAMERA_CREATE_MAX_REACHED;
     }
     
     // Create new camera entry using existing DLL slot
@@ -449,7 +461,7 @@ bool CreateNewCamera(const char* name)
     // Store the camera info
     if (!WriteStringToRegistry(HKEY_CURRENT_USER, cameraPath, "name", name)) {
         LOG("Failed to write camera name to registry\n");
-        return false;
+        return CAMERA_CREATE_REGISTRY_ERROR;
     }
     
     // Store the slot index
@@ -457,14 +469,20 @@ bool CreateNewCamera(const char* name)
     sprintf_s(slotStr, "%d", availableSlot);
     if (!WriteStringToRegistry(HKEY_CURRENT_USER, cameraPath, "slotIndex", slotStr)) {
         LOG("Failed to write slot index to registry\n");
-        return false;
+        return CAMERA_CREATE_REGISTRY_ERROR;
     }
     
     // Add to cache
     g_dynamicCameras.push_back(newCamera);
     
     LOG("Created new camera '%s' using slot %d\n", name, availableSlot);
-    return true;
+    return CAMERA_CREATE_SUCCESS;
+}
+
+// Legacy wrapper function for backward compatibility
+bool CreateNewCamera(const char* name)
+{
+    return CreateNewCameraEx(name) == CAMERA_CREATE_SUCCESS;
 }
 
 // Remove a camera and its configuration
@@ -568,6 +586,46 @@ bool HasCameraSettings(int cameraIndex)
     return (hasFps || hasResolution || hasMirror);
 }
 
+// Generate the next available default camera name (SpoutCam, SpoutCam2, SpoutCam3, etc.)
+std::string GenerateDefaultCameraName()
+{
+    // Start with "SpoutCam" (number 1, but no suffix)
+    std::string candidateName = "SpoutCam";
+    
+    // Check if "SpoutCam" is available
+    bool nameExists = false;
+    for (const auto& camera : g_dynamicCameras) {
+        if (camera.name == candidateName) {
+            nameExists = true;
+            break;
+        }
+    }
+    
+    if (!nameExists) {
+        return candidateName;
+    }
+    
+    // Try SpoutCam2, SpoutCam3, SpoutCam4, etc.
+    for (int i = 2; i <= MAX_DYNAMIC_CAMERAS + 10; i++) { // Check a bit beyond max cameras
+        candidateName = "SpoutCam" + std::to_string(i);
+        
+        nameExists = false;
+        for (const auto& camera : g_dynamicCameras) {
+            if (camera.name == candidateName) {
+                nameExists = true;
+                break;
+            }
+        }
+        
+        if (!nameExists) {
+            return candidateName;
+        }
+    }
+    
+    // Fallback - should rarely happen
+    return "SpoutCam_New";
+}
+
 void RefreshCameraList(HWND hListView)
 {
     g_filtersScanned = false; // Force rescan
@@ -575,6 +633,23 @@ void RefreshCameraList(HWND hListView)
     ScanRegisteredFilters();
     ScanDynamicCameras();
     PopulateCameraList(hListView);
+    
+    // Enable/disable the Add New Camera button based on maximum limit
+    HWND hParent = GetParent(hListView);
+    if (hParent) {
+        HWND hAddButton = GetDlgItem(hParent, IDC_ADD_NEW_CAMERA);
+        if (hAddButton) {
+            bool canAddMore = g_dynamicCameras.size() < MAX_DYNAMIC_CAMERAS;
+            EnableWindow(hAddButton, canAddMore ? TRUE : FALSE);
+            
+            // Update button text to indicate limit
+            if (canAddMore) {
+                SetWindowTextA(hAddButton, "Add New Camera");
+            } else {
+                SetWindowTextA(hAddButton, "Add New Camera (Max 8)");
+            }
+        }
+    }
 }
 
 void PopulateCameraList(HWND hListView)
@@ -778,18 +853,17 @@ void OpenCameraProperties(const DynamicCamera& camera)
     
     swprintf_s(cmdPath, MAX_PATH, L"%s\\%s\\SpoutCamProperties.cmd", exePath, subDir);
     
-    // Create a temporary file with both camera index and name
+    // Create the standard camera index file that SpoutCamProperties.cmd expects
     char tempFilePath[MAX_PATH];
-    sprintf_s(tempFilePath, "%S\\camera_info.tmp", exePath);
+    sprintf_s(tempFilePath, "%S\\camera_index.tmp", exePath);
     
     FILE* tempFile = nullptr;
     if (fopen_s(&tempFile, tempFilePath, "w") == 0 && tempFile) {
-        fprintf(tempFile, "cameraIndex=%d\n", camera.slotIndex);
-        fprintf(tempFile, "cameraName=%s\n", camera.name.c_str());
+        fprintf(tempFile, "Camera index: %d", camera.slotIndex);
         fclose(tempFile);
-        LOG("Created camera info file with index %d and name '%s'\n", camera.slotIndex, camera.name.c_str());
+        LOG("Created camera index file with index %d for camera '%s'\n", camera.slotIndex, camera.name.c_str());
     } else {
-        LOG("Failed to create camera info file, falling back to legacy method\n");
+        LOG("Failed to create camera index file, falling back to legacy method\n");
         // Fallback to legacy method
         OpenLegacyCameraProperties(camera.slotIndex);
         return;
@@ -869,8 +943,16 @@ INT_PTR CALLBACK AddCameraDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPA
     switch (message) {
         case WM_INITDIALOG:
             {
+                // Generate and set the default camera name
+                std::string defaultName = GenerateDefaultCameraName();
+                SetDlgItemTextA(hDlg, IDC_CAMERA_NAME_EDIT, defaultName.c_str());
+                
+                // Select all text in the edit control for easy editing
+                HWND hEdit = GetDlgItem(hDlg, IDC_CAMERA_NAME_EDIT);
+                SendMessage(hEdit, EM_SETSEL, 0, -1);
+                
                 // Set focus to the name edit control
-                SetFocus(GetDlgItem(hDlg, IDC_CAMERA_NAME_EDIT));
+                SetFocus(hEdit);
                 return FALSE; // Return FALSE since we set focus ourselves
             }
             
@@ -906,12 +988,40 @@ INT_PTR CALLBACK AddCameraDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                                 }
                             }
                             
-                            // Try to create the camera
-                            if (CreateNewCamera(cameraName)) {
+                            // Try to create the camera with detailed error reporting
+                            CameraCreationResult result = CreateNewCameraEx(cameraName);
+                            if (result == CAMERA_CREATE_SUCCESS) {
                                 EndDialog(hDlg, IDOK);
                                 return TRUE;
                             } else {
-                                MessageBox(hDlg, "Failed to create camera. The name may already be in use.", "Creation Failed", MB_OK | MB_ICONERROR);
+                                // Show specific error message based on the result
+                                const char* errorMessage;
+                                const char* errorTitle;
+                                
+                                switch (result) {
+                                    case CAMERA_CREATE_NAME_EXISTS:
+                                        errorMessage = "A camera with this name already exists. Please choose a different name.";
+                                        errorTitle = "Name Already Exists";
+                                        break;
+                                    case CAMERA_CREATE_MAX_REACHED:
+                                        errorMessage = "Maximum number of cameras (8) has been reached.\n\nTo add a new camera, please remove an existing camera first.";
+                                        errorTitle = "Maximum Cameras Reached";
+                                        break;
+                                    case CAMERA_CREATE_INVALID_NAME:
+                                        errorMessage = "Camera name is invalid. Please use a name between 1-64 characters.";
+                                        errorTitle = "Invalid Name";
+                                        break;
+                                    case CAMERA_CREATE_REGISTRY_ERROR:
+                                        errorMessage = "Failed to save camera configuration to registry. Please check permissions.";
+                                        errorTitle = "Registry Error";
+                                        break;
+                                    default:
+                                        errorMessage = "Failed to create camera due to an unknown error.";
+                                        errorTitle = "Creation Failed";
+                                        break;
+                                }
+                                
+                                MessageBox(hDlg, errorMessage, errorTitle, MB_OK | MB_ICONERROR);
                                 SetFocus(GetDlgItem(hDlg, IDC_CAMERA_NAME_EDIT));
                                 return TRUE;
                             }
@@ -987,6 +1097,16 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                 switch (wmId) {
                     case IDC_ADD_NEW_CAMERA:
                         {
+                            // Check if maximum cameras reached before opening dialog
+                            if (g_dynamicCameras.size() >= MAX_DYNAMIC_CAMERAS) {
+                                MessageBox(hDlg, 
+                                    "Maximum number of cameras (8) has been reached.\n\n"
+                                    "To add a new camera, please remove an existing camera first.",
+                                    "Maximum Cameras Reached", 
+                                    MB_OK | MB_ICONINFORMATION);
+                                break;
+                            }
+                            
                             // Show Add New Camera dialog
                             INT_PTR result = DialogBox(g_hInst, MAKEINTRESOURCE(IDD_ADD_CAMERA_DIALOG), hDlg, AddCameraDialogProc);
                             if (result == IDOK) {
