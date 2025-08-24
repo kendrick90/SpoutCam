@@ -29,4 +29,9 @@
 #define IDC_ADD_CAMERA                          423
 #define IDC_REMOVE_CAMERA                       424
 #define IDC_CAMERA_TABS                         425
+#define IDD_SETTINGS_MAIN                       426
+#define IDC_CAMERA_LIST                         427
+#define IDC_CONFIGURE_CAMERA                    428
+#define IDC_REGISTER_CAMERA                     429
+#define IDC_UNREGISTER_CAMERA                   430
 #define IDS_TITLE                               1015

@@ -664,23 +664,27 @@ void CSpoutCamProperties::UnregisterSingleCamera(int cameraIndex)
 	}
 }
 
-// Initialize the tab control with the first camera tab
+// Initialize the properties dialog for a single camera
 void CSpoutCamProperties::InitializeTabControl()
 {
+	// Remove tab control - this is now a single camera properties dialog
 	HWND hwndTab = GetDlgItem(this->m_Dlg, IDC_CAMERA_TABS);
-	if (!hwndTab) return;
-
-	// Add the first tab
-	TCITEM tie = {0};
-	tie.mask = TCIF_TEXT;
-	tie.pszText = L"SpoutCam1";
-	TabCtrl_InsertItem(hwndTab, 0, &tie);
-
-	// Select the first tab
-	TabCtrl_SetCurSel(hwndTab, 0);
-	g_currentCameraTab = 0;
+	if (hwndTab) {
+		ShowWindow(hwndTab, SW_HIDE);
+	}
 	
-	// Update the display for the first camera
+	// Hide Add/Remove camera buttons - managed by SpoutCamSettings now
+	HWND hwndAdd = GetDlgItem(this->m_Dlg, IDC_ADD_CAMERA);
+	if (hwndAdd) ShowWindow(hwndAdd, SW_HIDE);
+	
+	HWND hwndRemove = GetDlgItem(this->m_Dlg, IDC_REMOVE_CAMERA);  
+	if (hwndRemove) ShowWindow(hwndRemove, SW_HIDE);
+
+	// Always use camera index 0 for single camera mode
+	g_currentCameraTab = 0;
+	g_activeCameras = 1;
+	
+	// Update the display for this camera
 	UpdateCameraDisplay();
 }
 

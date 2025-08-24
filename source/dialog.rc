@@ -58,6 +58,33 @@ FONT 8, "Ms Shell Dlg"
 
 }
 
+// SpoutCam Settings Main Dialog
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDD_SETTINGS_MAIN DIALOG 0, 0, 400, 300
+STYLE DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_CAPTION | WS_SYSMENU
+CAPTION "SpoutCam Settings"
+FONT 8, "Ms Shell Dlg"
+{
+	LTEXT           "SpoutCam Camera Management", -1, 10, 10, 120, 8, SS_LEFT, WS_EX_LEFT
+	
+	// Camera list
+	CONTROL         "", IDC_CAMERA_LIST, WC_LISTVIEW, WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL, 10, 25, 300, 200, WS_EX_CLIENTEDGE
+	
+	// Buttons
+	PUSHBUTTON      "Configure", IDC_CONFIGURE_CAMERA, 320, 25, 70, 20, 0, WS_EX_LEFT
+	PUSHBUTTON      "Register", IDC_REGISTER_CAMERA, 320, 50, 70, 20, 0, WS_EX_LEFT
+	PUSHBUTTON      "Unregister", IDC_UNREGISTER_CAMERA, 320, 75, 70, 20, 0, WS_EX_LEFT
+	PUSHBUTTON      "Refresh", IDC_REFRESH, 320, 100, 70, 20, 0, WS_EX_LEFT
+	
+	// Bottom buttons
+	DEFPUSHBUTTON   "Close", IDOK, 290, 270, 50, 14, 0, WS_EX_LEFT
+	PUSHBUTTON      "Cancel", IDCANCEL, 345, 270, 50, 14, 0, WS_EX_LEFT
+	
+	// Instructions
+	LTEXT           "Double-click a camera to configure it, or select and use buttons.", -1, 10, 235, 200, 8, SS_LEFT, WS_EX_LEFT
+	LTEXT           "Registered cameras appear in video applications like OBS.", -1, 10, 250, 200, 8, SS_LEFT, WS_EX_LEFT
+}
+
 /////////////////////////////////////////////////////////////////////////////
 //
 // String Table
