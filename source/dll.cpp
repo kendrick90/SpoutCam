@@ -140,11 +140,72 @@ const AMOVIESETUP_PIN AMSPinVCam=
 AMOVIESETUP_FILTER AMSFilters[MAX_SPOUT_CAMERAS];
 WCHAR CameraNames[MAX_SPOUT_CAMERAS][64];
 
+// Registry helper functions
+bool ReadCustomCameraName(int cameraIndex, char* nameBuffer, int bufferSize) {
+    // Try to find a custom name for this camera slot
+    HKEY camerasKey;
+    LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam\\Cameras", 0, KEY_READ, &camerasKey);
+    if (result != ERROR_SUCCESS) {
+        return false; // No custom cameras registry
+    }
+    
+    DWORD subkeyCount = 0;
+    DWORD maxSubkeyLen = 0;
+    result = RegQueryInfoKeyA(camerasKey, nullptr, nullptr, nullptr, &subkeyCount, &maxSubkeyLen, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+    
+    if (result == ERROR_SUCCESS && maxSubkeyLen > 0) {
+        char* subkeyName = new char[maxSubkeyLen + 1];
+        
+        for (DWORD i = 0; i < subkeyCount; i++) {
+            DWORD subkeyNameLen = maxSubkeyLen + 1;
+            if (RegEnumKeyExA(camerasKey, i, subkeyName, &subkeyNameLen, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
+                // Check if this camera entry matches our camera index
+                char cameraPath[512];
+                sprintf_s(cameraPath, "Software\\Leading Edge\\SpoutCam\\Cameras\\%s", subkeyName);
+                
+                HKEY cameraKey;
+                if (RegOpenKeyExA(HKEY_CURRENT_USER, cameraPath, 0, KEY_READ, &cameraKey) == ERROR_SUCCESS) {
+                    char slotStr[16];
+                    DWORD type = REG_SZ;
+                    DWORD size = sizeof(slotStr);
+                    if (RegQueryValueExA(cameraKey, "slotIndex", nullptr, &type, (LPBYTE)slotStr, &size) == ERROR_SUCCESS) {
+                        int slotIndex = atoi(slotStr);
+                        if (slotIndex == cameraIndex) {
+                            // Found a custom name for this camera slot
+                            strncpy_s(nameBuffer, bufferSize, subkeyName, _TRUNCATE);
+                            RegCloseKey(cameraKey);
+                            delete[] subkeyName;
+                            RegCloseKey(camerasKey);
+                            return true;
+                        }
+                    }
+                    RegCloseKey(cameraKey);
+                }
+            }
+        }
+        delete[] subkeyName;
+    }
+    
+    RegCloseKey(camerasKey);
+    return false;
+}
+
 // Initialize filter setups
 void InitializeFilterSetups() {
     for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {
+        char customName[256];
+        const char* nameToUse;
+        
+        // Try to get custom name from registry first
+        if (ReadCustomCameraName(i, customName, sizeof(customName))) {
+            nameToUse = customName;
+        } else {
+            // Fall back to default name
+            nameToUse = g_CameraConfigs[i].name;
+        }
+        
         // Convert camera name to wide string
-        MultiByteToWideChar(CP_ACP, 0, g_CameraConfigs[i].name, -1, CameraNames[i], 64);
+        MultiByteToWideChar(CP_ACP, 0, nameToUse, -1, CameraNames[i], 64);
         
         AMSFilters[i].clsID = &g_CameraConfigs[i].clsid;
         AMSFilters[i].strName = CameraNames[i];
@@ -230,6 +291,9 @@ STDAPI RegisterFilters( BOOL bRegister )
     hr = CoInitialize(0);
     if(bRegister)
     {
+        // Refresh camera names from registry before registration
+        InitializeFilterSetups();
+        
         // Register all cameras and their property pages
         for (int i = 0; i < MAX_SPOUT_CAMERAS && SUCCEEDED(hr); i++) {
             hr = AMovieSetupRegisterServer(g_CameraConfigs[i].clsid, CameraNames[i], achFileName, L"Both", L"InprocServer32");
@@ -292,6 +356,9 @@ HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
     hr = CoInitialize(0);
     if(bRegister)
     {
+        // Refresh camera names from registry before registration
+        InitializeFilterSetups();
+        
         if (cameraIndex >= 0 && cameraIndex < MAX_SPOUT_CAMERAS) {
             // Register single camera and its property page
             hr = AMovieSetupRegisterServer(g_CameraConfigs[cameraIndex].clsid, CameraNames[cameraIndex], achFileName, L"Both", L"InprocServer32");
@@ -317,6 +384,7 @@ HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
         {
             if(bRegister)
             {
+                // Ensure camera names are up to date for filter registration too
                 if (cameraIndex >= 0 && cameraIndex < MAX_SPOUT_CAMERAS) {
                     // Register single camera as a video input device
                     IMoniker *pMoniker = 0;
@@ -401,6 +469,28 @@ extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE RegisterSingleSpoutCamer
 extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE UnregisterSingleSpoutCamera(int cameraIndex)
 {
     return RegisterSingleCameraFilter(FALSE, cameraIndex);
+}
+
+// External function to get the name that will be used for a camera index
+extern "C" __declspec(dllexport) BOOL STDAPICALLTYPE GetSpoutCameraName(int cameraIndex, char* nameBuffer, int bufferSize)
+{
+    if (cameraIndex < 0 || cameraIndex >= MAX_SPOUT_CAMERAS || !nameBuffer || bufferSize <= 0) {
+        return FALSE;
+    }
+    
+    char customName[256];
+    const char* nameToUse;
+    
+    // Try to get custom name from registry first
+    if (ReadCustomCameraName(cameraIndex, customName, sizeof(customName))) {
+        nameToUse = customName;
+    } else {
+        // Fall back to default name
+        nameToUse = g_CameraConfigs[cameraIndex].name;
+    }
+    
+    strncpy_s(nameBuffer, bufferSize, nameToUse, _TRUNCATE);
+    return TRUE;
 }
 
 // Configure a specific camera instance 

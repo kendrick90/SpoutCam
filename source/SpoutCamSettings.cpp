@@ -120,10 +120,13 @@ bool WriteStringToRegistry(HKEY hKey, const char* subkey, const char* valuename,
 bool WriteBinaryToRegistry(HKEY hKey, const char* subkey, const char* valuename, const BYTE* data, DWORD dataSize);
 void DeleteCameraConfiguration(const char* cameraName);
 void DeleteLegacyCameraConfiguration(int cameraIndex);
+bool IsCameraRegistered(int cameraIndex);
+bool HasCameraSettings(int cameraIndex);
 
 // Function typedefs for DLL exports
 typedef HRESULT (STDAPICALLTYPE *RegisterSingleSpoutCameraFunc)(int cameraIndex);
 typedef HRESULT (STDAPICALLTYPE *UnregisterSingleSpoutCameraFunc)(int cameraIndex);
+typedef BOOL (STDAPICALLTYPE *GetSpoutCameraNameFunc)(int cameraIndex, char* nameBuffer, int bufferSize);
 
 HINSTANCE g_hInst;
 
@@ -358,15 +361,8 @@ void ScanDynamicCameras()
                     WriteStringToRegistry(HKEY_CURRENT_USER, cameraPath, "slotIndex", slotStr);
                 }
                 
-                // Check if camera is registered (by searching DirectShow filters using the DLL's default name)
-                camera.isRegistered = false;
-                const char* dllCameraName = g_StaticCameraConfigs[camera.slotIndex].defaultName;
-                for (const auto& filter : g_registeredFilters) {
-                    if (filter.find(dllCameraName) != std::string::npos) {
-                        camera.isRegistered = true;
-                        break;
-                    }
-                }
+                // Check if camera is registered using the actual name from the DLL
+                camera.isRegistered = IsCameraRegistered(camera.slotIndex);
                 
                 // Check if camera has settings using the legacy registry path
                 char legacyPath[256];
@@ -498,7 +494,44 @@ bool RemoveCamera(const DynamicCamera& camera)
 
 bool IsCameraRegistered(int cameraIndex)
 {
-    // Use cached filter scan results with correct SpoutCam naming
+    // Get the actual name that the DLL will use for this camera
+    char actualCameraName[256];
+    
+    // Try to load the DLL and get the actual name
+    wchar_t dllPath[MAX_PATH];
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+    if (lastSlash) *lastSlash = L'\0';
+    
+#ifdef _WIN64
+    const wchar_t* subDir = L"SpoutCam64";
+    const wchar_t* dllName = L"SpoutCam64.ax";
+#else
+    const wchar_t* subDir = L"SpoutCam32";  
+    const wchar_t* dllName = L"SpoutCam32.ax";
+#endif
+    
+    swprintf_s(dllPath, MAX_PATH, L"%s\\%s\\%s", exePath, subDir, dllName);
+    
+    HMODULE hDll = LoadLibraryW(dllPath);
+    if (hDll) {
+        GetSpoutCameraNameFunc getNameFunc = 
+            (GetSpoutCameraNameFunc)GetProcAddress(hDll, "GetSpoutCameraName");
+        
+        if (getNameFunc && getNameFunc(cameraIndex, actualCameraName, sizeof(actualCameraName))) {
+            // Use the actual name returned by the DLL
+            for (const auto& filter : g_registeredFilters) {
+                if (filter.find(actualCameraName) != std::string::npos) {
+                    FreeLibrary(hDll);
+                    return true;
+                }
+            }
+        }
+        FreeLibrary(hDll);
+    }
+    
+    // Fallback to old method if DLL is not available
     char searchName[32];
     if (cameraIndex == 0) {
         strcpy_s(searchName, "SpoutCam");  // First camera has no number

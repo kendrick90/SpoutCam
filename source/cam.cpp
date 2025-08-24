@@ -1093,6 +1093,7 @@ HRESULT CVCamStream::FillBuffer(IMediaSample *pms)
 				WritePathToRegistry(HKEY_CURRENT_USER, m_registryPath, "sendername", g_SenderName);
 			}
 		}
+		
 		bInitialized = true;
 		NumFrames++;
 		return NOERROR;
