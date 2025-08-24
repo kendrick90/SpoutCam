@@ -32,3 +32,19 @@
 *.app
 
 *.log
+
+# Visual Studio build artifacts
+Debug/
+Release/
+x64/
+Win32/
+lib/
+*.vcxproj.user
+*.sln.docstates
+.vs/
+*.tlog/
+
+# Temporary build scripts (keep build_all_four.bat as it works)
+
+# Multiple SpoutCam builds (optional - uncomment to ignore built .ax files)
+# binaries/MULTIPLE_SPOUTCAM/
