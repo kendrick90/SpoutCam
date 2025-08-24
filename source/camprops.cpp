@@ -94,9 +94,48 @@ INT_PTR CSpoutCamProperties::OnReceiveMessage(HWND hwnd, UINT uMsg, WPARAM wPara
 			break;
 
 		case WM_INITDIALOG:
+			// Set custom window title
+			SetWindowTextW(hwnd, L"SpoutCam Settings");
+			
+			// Center the window on screen using work area
+			{
+				RECT windowRect;
+				GetWindowRect(hwnd, &windowRect);
+				
+				// Get the work area (screen minus taskbar)
+				MONITORINFO mi = { sizeof(mi) };
+				GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi);
+				
+				int windowWidth = windowRect.right - windowRect.left;
+				int windowHeight = windowRect.bottom - windowRect.top;
+				int centerX = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - windowWidth) / 2;
+				int centerY = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - windowHeight) / 2;
+				
+				SetWindowPos(hwnd, HWND_TOP, centerX, centerY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
+			}
+			
 			// Hyperlink hand cursor
 			cursorHand = LoadCursor(NULL, IDC_HAND);
 			SetClassLongPtr(GetDlgItem(hwnd, IDC_SPOUT_URL), GCLP_HCURSOR, (LONG_PTR)cursorHand);
+			break;
+
+		case WM_SHOWWINDOW:
+			if (wParam) // If showing the window
+			{
+				// Center the window when it's about to be shown
+				RECT windowRect;
+				GetWindowRect(hwnd, &windowRect);
+				
+				MONITORINFO mi = { sizeof(mi) };
+				GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi);
+				
+				int windowWidth = windowRect.right - windowRect.left;
+				int windowHeight = windowRect.bottom - windowRect.top;
+				int centerX = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - windowWidth) / 2;
+				int centerY = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - windowHeight) / 2;
+				
+				SetWindowPos(hwnd, HWND_TOP, centerX, centerY, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+			}
 			break;
 
 		case WM_COMMAND:
@@ -258,6 +297,8 @@ HRESULT CSpoutCamProperties::OnActivate()
 {
 	TRACE("OnActivate");
 
+	// Window title and centering now handled in WM_INITDIALOG
+
 	HWND hwndCtl = nullptr;
 	DWORD dwValue = 0;
 
@@ -402,8 +443,12 @@ HRESULT CSpoutCamProperties::OnApplyChanges()
 	char name[256];
 	char keyName[256];
 
-	// Create camera-specific registry key for current tab
-	sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+	// Create camera-specific registry key for current tab (match cam.cpp logic)
+	if (g_currentCameraTab == 0) {
+		strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
+	} else {
+		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+	}
 
 	// =================================
 	// Get old fps and resolution for user warning
@@ -730,8 +775,12 @@ void CSpoutCamProperties::SaveCurrentCameraSettings()
 	char name[256];
 	char keyName[256];
 
-	// Create camera-specific registry key
-	sprintf_s(keyName, "SpoutCam%d", g_currentCameraTab + 1);
+	// Create camera-specific registry key (match cam.cpp logic)
+	if (g_currentCameraTab == 0) {
+		strcpy_s(keyName, "SpoutCam");
+	} else {
+		sprintf_s(keyName, "SpoutCam%d", g_currentCameraTab + 1);
+	}
 
 	HWND hwndCtl = GetDlgItem(this->m_Dlg, IDC_FPS);
 	dwFps = ComboBox_GetCurSel(hwndCtl);
@@ -745,12 +794,20 @@ void CSpoutCamProperties::SaveCurrentCameraSettings()
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_NAME);
 	Edit_GetText(hwndCtl, wname, 256);
 	WideCharToMultiByte(CP_ACP, 0, wname, -1, name, 256, NULL, NULL);
-	sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+	if (g_currentCameraTab == 0) {
+		strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
+	} else {
+		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+	}
 	WritePathToRegistry(HKEY_CURRENT_USER, keyName, "senderstart", name);
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_MIRROR);
 	dwMirror = Button_GetCheck(hwndCtl);
-	sprintf_s(name, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+	if (g_currentCameraTab == 0) {
+		strcpy_s(name, "Software\\Leading Edge\\SpoutCam");
+	} else {
+		sprintf_s(name, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+	}
 	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "mirror", dwMirror);
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_SWAP);
@@ -837,8 +894,12 @@ void CSpoutCamProperties::ApplyRealTimeSettings()
 	char name[256];
 	wchar_t wname[256];
 
-	// Create camera-specific registry key for current tab
-	sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+	// Create camera-specific registry key for current tab (match cam.cpp logic)
+	if (g_currentCameraTab == 0) {
+		strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
+	} else {
+		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", g_currentCameraTab + 1);
+	}
 
 	// Get current control values
 	HWND hwndCtl = GetDlgItem(this->m_Dlg, IDC_MIRROR);

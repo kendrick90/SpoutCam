@@ -30,15 +30,19 @@ goto BUILD_BOTH
 
 :BUILD_BOTH
 call :BuildArch x64
+if errorlevel 1 goto FAILED
 call :BuildArch x86
+if errorlevel 1 goto FAILED
 goto END
 
 :BUILD_X64
 call :BuildArch x64
+if errorlevel 1 goto FAILED
 goto END
 
 :BUILD_X86
 call :BuildArch x86
+if errorlevel 1 goto FAILED
 goto END
 
 :BuildArch
@@ -84,7 +88,7 @@ echo - DEBUG: About to check if build failed...
 if "%BUILD_RESULT%" neq "0" (
     echo.
     echo *** %ARCH% BUILD FAILED Error Level: %BUILD_RESULT% ***
-    goto :eof
+    exit /b 1
 )
 echo - DEBUG: Build check passed, continuing...
 
@@ -112,8 +116,20 @@ if exist "%BINARIES_AX%" (
 )
 
 echo.
-echo Step 4: Build completed successfully!
+echo Step 4: Verifying SpoutCamSettings.exe build...
+if exist "binaries\SPOUTCAM\SpoutCamSettings.exe" (
+    echo - SUCCESS: SpoutCamSettings.exe built successfully
+    for %%i in ("binaries\SPOUTCAM\SpoutCamSettings.exe") do (
+        echo - File size: %%~zi bytes, Modified: %%~ti
+    )
+) else (
+    echo - WARNING: SpoutCamSettings.exe not found - check post-build step
+)
+
+echo.
+echo Step 5: Build completed successfully!
 echo - Built: %BINARIES_AX%
+echo - Settings: binaries\SPOUTCAM\SpoutCamSettings.exe
 echo.
 echo NOTE: SpoutCam is NOT automatically registered after build.
 echo To register SpoutCam for use:
@@ -135,6 +151,19 @@ echo through the properties dialog.
 echo.
 echo Build process completed! Press any key to exit...
 pause >nul
+exit /b 0
+
+:FAILED
+echo.
+echo ===============================================
+echo BUILD FAILED!
+echo ===============================================
+echo.
+echo One or more builds failed. Please check the error messages above.
+echo.
+echo Build process failed! Press any key to exit...
+pause >nul
+exit /b 1
 
 :ShowFileInfo
 for %%i in (%1) do (

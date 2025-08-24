@@ -141,7 +141,8 @@
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <PostBuildEvent>
-      <Command>copy /y $(TargetPath) binaries\SPOUTCAM\SpoutCam32\SpoutCam32.ax</Command>
+      <Command>copy /y $(TargetPath) binaries\SPOUTCAM\SpoutCam32\SpoutCam32.ax
+cl.exe /DNDEBUG /D_WINDOWS /D_CONSOLE /DDIALOG_WITHOUT_REGISTRATION /MT /W3 /O2 /Fe:binaries\SPOUTCAM\SpoutCamSettings.exe source\SpoutCamSettings.cpp ole32.lib oleaut32.lib shell32.lib user32.lib /link /SUBSYSTEM:WINDOWS /MANIFESTUAC:"level='requireAdministrator' uiAccess='false'"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -164,7 +165,8 @@
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <PostBuildEvent>
-      <Command>copy /y $(TargetPath) binaries\SPOUTCAM\SpoutCam64\SpoutCam64.ax</Command>
+      <Command>copy /y $(TargetPath) binaries\SPOUTCAM\SpoutCam64\SpoutCam64.ax
+cl.exe /DNDEBUG /D_WINDOWS /D_CONSOLE /DDIALOG_WITHOUT_REGISTRATION /MT /W3 /O2 /Fe:binaries\SPOUTCAM\SpoutCamSettings.exe source\SpoutCamSettings.cpp ole32.lib oleaut32.lib shell32.lib user32.lib /link /SUBSYSTEM:WINDOWS /MANIFESTUAC:"level='requireAdministrator' uiAccess='false'"</Command>
     </PostBuildEvent>
     <Manifest>
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>

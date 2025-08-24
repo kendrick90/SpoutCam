@@ -12,7 +12,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 {
     // Get the directory where this executable is located
     wchar_t exePath[MAX_PATH];
-    GetModuleFileName(nullptr, exePath, MAX_PATH);
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
     wchar_t* lastSlash = wcsrchr(exePath, L'\\');
     if (lastSlash) *lastSlash = 0; // Remove filename, keep directory
 
@@ -37,7 +37,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Execute rundll32.exe with the DLL and Configure function, from the DLL directory
     // This mimics exactly what the .cmd file does: rundll32.exe SpoutCam64.ax,Configure
-    HINSTANCE result = ShellExecute(
+    HINSTANCE result = ShellExecuteW(
         nullptr,                    // parent window
         L"open",                    // operation
         L"rundll32.exe",           // program to run
@@ -50,7 +50,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         wchar_t errorMsg[512];
         swprintf_s(errorMsg, 512, L"Failed to execute rundll32.exe\nDLL: %s\nDirectory: %s\nError code: %d", 
                   dllName, dllDir, (int)(INT_PTR)result);
-        MessageBox(nullptr, errorMsg, L"SpoutCam Settings", MB_OK | MB_ICONERROR);
+        MessageBoxW(nullptr, errorMsg, L"SpoutCam Settings", MB_OK | MB_ICONERROR);
         return 1;
     }
     
