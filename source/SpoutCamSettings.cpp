@@ -1252,6 +1252,48 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                         }
                         break;
                         
+                    case IDC_REREGISTER_CAMERA:
+                        {
+                            int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
+                            if (selected != -1 && selected < (int)g_dynamicCameras.size()) {
+                                const auto& camera = g_dynamicCameras[selected];
+                                
+                                LOG("Reregistering camera '%s' using slot %d\n", camera.name.c_str(), camera.slotIndex);
+                                
+                                // First unregister
+                                bool unregisterSuccess = UnregisterCamera(camera);
+                                
+                                // Brief pause to ensure unregistration is complete
+                                Sleep(500);
+                                
+                                // Then register again
+                                bool registerSuccess = RegisterCamera(camera);
+                                
+                                if (unregisterSuccess && registerSuccess) {
+                                    RefreshCameraList(hListView);
+                                    LOG("Camera '%s' reregistered successfully\n", camera.name.c_str());
+                                    
+                                    // Show success message
+                                    char successMsg[256];
+                                    sprintf_s(successMsg, "Camera '%s' has been successfully reregistered.\n\nThe camera is now ready to use in video applications.", camera.name.c_str());
+                                    MessageBox(hDlg, successMsg, "Reregistration Complete", MB_OK | MB_ICONINFORMATION);
+                                } else {
+                                    RefreshCameraList(hListView);
+                                    LOG("Failed to reregister camera '%s' (unregister: %s, register: %s)\n", 
+                                        camera.name.c_str(), 
+                                        unregisterSuccess ? "success" : "failed",
+                                        registerSuccess ? "success" : "failed");
+                                    
+                                    char errorMsg[256];
+                                    sprintf_s(errorMsg, "Failed to reregister camera '%s'.\n\nCheck the debug console for details.", camera.name.c_str());
+                                    MessageBox(hDlg, errorMsg, "Reregistration Failed", MB_OK | MB_ICONERROR);
+                                }
+                            } else {
+                                MessageBox(hDlg, "Please select a camera to reregister.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
+                            }
+                        }
+                        break;
+                        
                     case IDC_REMOVE_CAMERA:
                         {
                             int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);

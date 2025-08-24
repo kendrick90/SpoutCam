@@ -25,6 +25,7 @@
 #define IDC_REFRESH                             419
 #define IDC_REGISTER                            420
 #define IDC_UNREGISTER                          421
+#define IDC_REREGISTER                          436
 #define IDC_UNREGISTER_ALL                      422
 #define IDC_ADD_CAMERA                          423
 #define IDC_REMOVE_CAMERA                       424
@@ -34,6 +35,7 @@
 #define IDC_CONFIGURE_CAMERA                    428
 #define IDC_REGISTER_CAMERA                     429
 #define IDC_UNREGISTER_CAMERA                   430
+#define IDC_REREGISTER_CAMERA                   437
 #define IDC_CLEANUP                             431
 #define IDC_ADD_NEW_CAMERA                      432
 #define IDD_ADD_CAMERA_DIALOG                   433

@@ -195,6 +195,23 @@ INT_PTR CSpoutCamProperties::OnReceiveMessage(HWND hwnd, UINT uMsg, WPARAM wPara
 					}
 					break;
 
+				case IDC_REREGISTER:
+					// Reregister this specific camera (unregister then register)
+					{
+						int cameraIndex = 0;
+						GetCameraIndex(&cameraIndex);
+						
+						// First unregister
+						UnregisterSingleCamera(cameraIndex);
+						
+						// Brief pause to ensure unregistration is complete
+						Sleep(500);
+						
+						// Then register again
+						RegisterSingleCamera(cameraIndex);
+					}
+					break;
+
 
 
 				case IDC_SENDER_LIST:
@@ -1049,7 +1066,7 @@ void CSpoutCamProperties::RefreshControlsDisplay()
 	int controlIds[] = {
 		IDC_FPS, IDC_RESOLUTION, IDC_SENDER_LIST, IDC_REFRESH,
 		IDC_NAME, IDC_MIRROR, IDC_FLIP, IDC_SWAP,
-		IDC_REGISTER, IDC_UNREGISTER, IDC_REMOVE_CAMERA
+		IDC_REGISTER, IDC_UNREGISTER, IDC_REREGISTER, IDC_REMOVE_CAMERA
 	};
 
 	// Force redraw of all controls
