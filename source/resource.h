@@ -35,4 +35,8 @@
 #define IDC_REGISTER_CAMERA                     429
 #define IDC_UNREGISTER_CAMERA                   430
 #define IDC_CLEANUP                             431
+#define IDC_ADD_NEW_CAMERA                      432
+#define IDD_ADD_CAMERA_DIALOG                   433
+#define IDC_CAMERA_NAME_EDIT                    434
+#define IDC_CAMERA_NAME_LABEL                   435
 #define IDS_TITLE                               1015

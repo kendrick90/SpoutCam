@@ -39,7 +39,7 @@
 #define SPOUTCAMNAME "SpoutCam Settings"
 
 // Multiple camera support - configure how many cameras you want (1-8)
-#define MAX_SPOUT_CAMERAS 4
+#define MAX_SPOUT_CAMERAS 8
 
 // Structure to hold camera configuration
 struct SpoutCamConfig {

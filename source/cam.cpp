@@ -384,6 +384,22 @@ CUnknown * WINAPI CreateCamera3(LPUNKNOWN lpunk, HRESULT *phr) {
     return CVCam::CreateCameraInstance(lpunk, phr, 3);
 }
 
+CUnknown * WINAPI CreateCamera4(LPUNKNOWN lpunk, HRESULT *phr) {
+    return CVCam::CreateCameraInstance(lpunk, phr, 4);
+}
+
+CUnknown * WINAPI CreateCamera5(LPUNKNOWN lpunk, HRESULT *phr) {
+    return CVCam::CreateCameraInstance(lpunk, phr, 5);
+}
+
+CUnknown * WINAPI CreateCamera6(LPUNKNOWN lpunk, HRESULT *phr) {
+    return CVCam::CreateCameraInstance(lpunk, phr, 6);
+}
+
+CUnknown * WINAPI CreateCamera7(LPUNKNOWN lpunk, HRESULT *phr) {
+    return CVCam::CreateCameraInstance(lpunk, phr, 7);
+}
+
 // Helper method to find camera configuration by CLSID
 int CVCam::FindCameraConfig(REFCLSID clsid) {
     for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {

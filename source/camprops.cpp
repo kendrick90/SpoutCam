@@ -599,12 +599,55 @@ void CSpoutCamProperties::InitializeCameraName()
 	// Update the camera name label in the dialog to show the specific camera
 	HWND hwndName = GetDlgItem(this->m_Dlg, IDC_CAMERA_NAME);
 	if (hwndName) {
-		WCHAR cameraName[64];
-		if (m_cameraIndex == 0) {
-			wcscpy_s(cameraName, 64, L"SpoutCam");
-		} else {
-			swprintf_s(cameraName, 64, L"SpoutCam%d", m_cameraIndex + 1);
+		WCHAR cameraName[256];
+		
+		// Try to read custom camera name from info file
+		bool foundCustomName = false;
+		char exePath[MAX_PATH];
+		GetModuleFileNameA(NULL, exePath, MAX_PATH);
+		char* lastSlash = strrchr(exePath, '\\');
+		if (lastSlash) *lastSlash = '\0';
+		
+		char tempFilePath[MAX_PATH];
+		sprintf_s(tempFilePath, "%s\\camera_info.tmp", exePath);
+		
+		FILE* infoFile = nullptr;
+		if (fopen_s(&infoFile, tempFilePath, "r") == 0 && infoFile) {
+			char line[512];
+			int fileIndex = -1;
+			char customName[256] = "";
+			
+			while (fgets(line, sizeof(line), infoFile)) {
+				// Remove newline
+				line[strcspn(line, "\r\n")] = 0;
+				
+				if (strncmp(line, "cameraIndex=", 12) == 0) {
+					fileIndex = atoi(line + 12);
+				} else if (strncmp(line, "cameraName=", 11) == 0) {
+					strcpy_s(customName, line + 11);
+				}
+			}
+			fclose(infoFile);
+			
+			// If this file matches our camera index, use the custom name
+			if (fileIndex == m_cameraIndex && strlen(customName) > 0) {
+				MultiByteToWideChar(CP_ACP, 0, customName, -1, cameraName, 256);
+				foundCustomName = true;
+			}
+			
+			// Clean up the temporary file after reading
+			DeleteFileA(tempFilePath);
 		}
+		
+		// Fallback to default naming if no custom name found
+		if (!foundCustomName) {
+			if (m_cameraIndex == 0) {
+				wcscpy_s(cameraName, 256, L"SpoutCam");
+			} else {
+				swprintf_s(cameraName, 256, L"SpoutCam%d", m_cameraIndex + 1);
+			}
+		}
+		
 		Static_SetText(hwndName, cameraName);
 	}
 }

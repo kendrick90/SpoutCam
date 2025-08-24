@@ -63,11 +63,13 @@ FONT 8, "Ms Shell Dlg"
 	CONTROL         "", IDC_CAMERA_LIST, WC_LISTVIEW, WS_TABSTOP | WS_BORDER | LVS_REPORT | LVS_SINGLESEL, 10, 25, 300, 200, WS_EX_CLIENTEDGE
 	
 	// Buttons
-	PUSHBUTTON      "Configure", IDC_CONFIGURE_CAMERA, 320, 25, 70, 20, 0, WS_EX_LEFT
-	PUSHBUTTON      "Register", IDC_REGISTER_CAMERA, 320, 50, 70, 20, 0, WS_EX_LEFT
-	PUSHBUTTON      "Unregister", IDC_UNREGISTER_CAMERA, 320, 75, 70, 20, 0, WS_EX_LEFT
-	PUSHBUTTON      "Refresh", IDC_REFRESH, 320, 100, 70, 20, 0, WS_EX_LEFT
-	PUSHBUTTON      "Cleanup", IDC_CLEANUP, 320, 125, 70, 20, 0, WS_EX_LEFT
+	PUSHBUTTON      "Add New Camera", IDC_ADD_NEW_CAMERA, 320, 25, 70, 20, 0, WS_EX_LEFT
+	PUSHBUTTON      "Configure", IDC_CONFIGURE_CAMERA, 320, 50, 70, 20, 0, WS_EX_LEFT
+	PUSHBUTTON      "Register", IDC_REGISTER_CAMERA, 320, 75, 70, 20, 0, WS_EX_LEFT
+	PUSHBUTTON      "Unregister", IDC_UNREGISTER_CAMERA, 320, 100, 70, 20, 0, WS_EX_LEFT
+	PUSHBUTTON      "Remove", IDC_REMOVE_CAMERA, 320, 125, 70, 20, 0, WS_EX_LEFT
+	PUSHBUTTON      "Refresh", IDC_REFRESH, 320, 150, 70, 20, 0, WS_EX_LEFT
+	PUSHBUTTON      "Cleanup", IDC_CLEANUP, 320, 175, 70, 20, 0, WS_EX_LEFT
 	
 	// Bottom buttons
 	DEFPUSHBUTTON   "Close", IDOK, 290, 270, 50, 14, 0, WS_EX_LEFT
@@ -76,6 +78,23 @@ FONT 8, "Ms Shell Dlg"
 	// Instructions
 	LTEXT           "Double-click a camera to configure it, or select and use buttons.", -1, 10, 235, 200, 8, SS_LEFT, WS_EX_LEFT
 	LTEXT           "Registered cameras appear in video applications like OBS.", -1, 10, 250, 200, 8, SS_LEFT, WS_EX_LEFT
+}
+
+// Add New Camera Dialog
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDD_ADD_CAMERA_DIALOG DIALOG 0, 0, 250, 120
+STYLE DS_CENTER | DS_MODALFRAME | DS_SHELLFONT | WS_CAPTION | WS_SYSMENU
+CAPTION "Add New SpoutCam"
+FONT 8, "Ms Shell Dlg"
+{
+	LTEXT           "Enter a name for the new virtual camera:", IDC_CAMERA_NAME_LABEL, 10, 10, 150, 8, SS_LEFT, WS_EX_LEFT
+	EDITTEXT        IDC_CAMERA_NAME_EDIT, 10, 25, 230, 14, WS_TABSTOP | ES_AUTOHSCROLL, WS_EX_LEFT
+	
+	LTEXT           "This name will appear in video applications.", -1, 10, 45, 150, 8, SS_LEFT, WS_EX_LEFT
+	LTEXT           "Use descriptive names like 'OBS Stream', 'Teams Camera', etc.", -1, 10, 55, 200, 8, SS_LEFT, WS_EX_LEFT
+	
+	DEFPUSHBUTTON   "Create Camera", IDOK, 130, 85, 60, 14, 0, WS_EX_LEFT
+	PUSHBUTTON      "Cancel", IDCANCEL, 195, 85, 45, 14, 0, WS_EX_LEFT
 }
 
 /////////////////////////////////////////////////////////////////////////////
