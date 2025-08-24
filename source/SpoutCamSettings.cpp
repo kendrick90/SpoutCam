@@ -5,50 +5,54 @@
 //
 
 #include <windows.h>
-#include <iostream>
-
-typedef void (CALLBACK* ConfigureFunc)();
+#include <shellapi.h>
+#include <stdio.h>
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
-    // Initialize COM
-    HRESULT hr = CoInitialize(nullptr);
-    if (FAILED(hr)) {
-        MessageBox(nullptr, L"Failed to initialize COM", L"SpoutCam Settings", MB_OK | MB_ICONERROR);
-        return 1;
-    }
+    // Get the directory where this executable is located
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileName(nullptr, exePath, MAX_PATH);
+    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+    if (lastSlash) *lastSlash = 0; // Remove filename, keep directory
 
-    // Determine which DLL to load based on platform
-    const wchar_t* dllPath;
+    // Determine which subdirectory and DLL to use based on platform
+    const wchar_t* subDir;
+    const wchar_t* dllName;
     #ifdef _WIN64
-        dllPath = L"SpoutCam64\\SpoutCam64.ax";
+        subDir = L"SpoutCam64";
+        dllName = L"SpoutCam64.ax";
     #else
-        dllPath = L"SpoutCam32\\SpoutCam32.ax";
+        subDir = L"SpoutCam32"; 
+        dllName = L"SpoutCam32.ax";
     #endif
 
-    // Load the SpoutCam DLL
-    HMODULE hDll = LoadLibrary(dllPath);
-    if (!hDll) {
-        MessageBox(nullptr, L"Failed to load SpoutCam DLL", L"SpoutCam Settings", MB_OK | MB_ICONERROR);
-        CoUninitialize();
+    // Build path to DLL directory
+    wchar_t dllDir[MAX_PATH];
+    swprintf_s(dllDir, MAX_PATH, L"%s\\%s", exePath, subDir);
+
+    // Build rundll32 parameters (exactly like the .cmd file does)
+    wchar_t parameters[MAX_PATH];
+    swprintf_s(parameters, MAX_PATH, L"%s,Configure", dllName);
+
+    // Execute rundll32.exe with the DLL and Configure function, from the DLL directory
+    // This mimics exactly what the .cmd file does: rundll32.exe SpoutCam64.ax,Configure
+    HINSTANCE result = ShellExecute(
+        nullptr,                    // parent window
+        L"open",                    // operation
+        L"rundll32.exe",           // program to run
+        parameters,                // parameters: "SpoutCam64.ax,Configure"
+        dllDir,                    // working directory (where the .ax file is)
+        SW_SHOW                    // show window
+    );
+
+    if ((INT_PTR)result <= 32) {
+        wchar_t errorMsg[512];
+        swprintf_s(errorMsg, 512, L"Failed to execute rundll32.exe\nDLL: %s\nDirectory: %s\nError code: %d", 
+                  dllName, dllDir, (int)(INT_PTR)result);
+        MessageBox(nullptr, errorMsg, L"SpoutCam Settings", MB_OK | MB_ICONERROR);
         return 1;
     }
-
-    // Get the Configure function
-    ConfigureFunc Configure = (ConfigureFunc)GetProcAddress(hDll, "Configure");
-    if (!Configure) {
-        MessageBox(nullptr, L"Failed to find Configure function", L"SpoutCam Settings", MB_OK | MB_ICONERROR);
-        FreeLibrary(hDll);
-        CoUninitialize();
-        return 1;
-    }
-
-    // Call the Configure function
-    Configure();
-
-    // Cleanup
-    FreeLibrary(hDll);
-    CoUninitialize();
     
     return 0;
 }
