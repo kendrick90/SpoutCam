@@ -132,7 +132,7 @@ bool DynamicCameraManager::DeleteCamera(const std::string& cameraName) {
         m_propPageClsidToName.erase(GuidToString(it->second.propPageClsid));
         m_cameras.erase(it);
         
-        // Delete registry configuration
+        // Delete ALL registry data for this camera
         DeleteCameraFromRegistry(cameraName);
         
         // Note: CLSID unregistration is handled by UnregisterCameraByName() in SpoutCamSettings
@@ -174,13 +174,10 @@ bool DynamicCameraManager::StringToGuid(const std::string& str, GUID& guid) {
 bool DynamicCameraManager::LoadCamerasFromRegistry() {
     HKEY hKey;
     LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, 
-        "Software\\Leading Edge\\SpoutCam\\DynamicCameras", 0, KEY_READ, &hKey);
+        "Software\\Leading Edge\\SpoutCam", 0, KEY_READ, &hKey);
     
     if (result != ERROR_SUCCESS) {
-        // Create default cameras if registry doesn't exist
-        CreateCamera("SpoutCam");
-        CreateCamera("SpoutCam2");
-        CreateCamera("SpoutCam3");
+        // Don't auto-create cameras - let the UI handle camera creation
         return false;
     }
     
@@ -192,7 +189,13 @@ bool DynamicCameraManager::LoadCamerasFromRegistry() {
            nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
         
         HKEY hCameraKey;
-        std::string cameraPath = "Software\\Leading Edge\\SpoutCam\\DynamicCameras\\";
+        // Skip global settings - only process camera subkeys
+        if (strcmp(subkeyName, "DynamicCameras") == 0) {
+            subkeyNameSize = sizeof(subkeyName);
+            continue;
+        }
+        
+        std::string cameraPath = "Software\\Leading Edge\\SpoutCam\\";
         cameraPath += subkeyName;
         
         if (RegOpenKeyExA(HKEY_CURRENT_USER, cameraPath.c_str(), 0, KEY_READ, &hCameraKey) == ERROR_SUCCESS) {
@@ -260,7 +263,7 @@ bool DynamicCameraManager::LoadCamerasFromRegistry() {
 
 bool DynamicCameraManager::SaveCameraToRegistry(const DynamicCameraConfig& camera) {
     HKEY hKey;
-    std::string keyPath = "Software\\Leading Edge\\SpoutCam\\DynamicCameras\\";
+    std::string keyPath = "Software\\Leading Edge\\SpoutCam\\";
     keyPath += camera.name;
     
     LONG result = RegCreateKeyExA(HKEY_CURRENT_USER, keyPath.c_str(), 0, nullptr,
@@ -296,7 +299,7 @@ bool DynamicCameraManager::DeleteCameraFromRegistry(const std::string& cameraNam
         // For empty camera names, we need to enumerate all keys and find/delete empty ones
         HKEY hKey;
         LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, 
-            "Software\\Leading Edge\\SpoutCam\\DynamicCameras", 0, KEY_ENUMERATE_SUB_KEYS | KEY_WRITE, &hKey);
+            "Software\\Leading Edge\\SpoutCam", 0, KEY_ENUMERATE_SUB_KEYS | KEY_WRITE, &hKey);
         
         if (result != ERROR_SUCCESS) {
             return false;  // Registry key doesn't exist
@@ -329,12 +332,13 @@ bool DynamicCameraManager::DeleteCameraFromRegistry(const std::string& cameraNam
     }
     
     // Normal case: delete specific camera registry key
-    std::string keyPath = "Software\\Leading Edge\\SpoutCam\\DynamicCameras\\";
+    std::string keyPath = "Software\\Leading Edge\\SpoutCam\\";
     keyPath += cameraName;
     
     LONG result = RegDeleteKeyA(HKEY_CURRENT_USER, keyPath.c_str());
     return result == ERROR_SUCCESS;
 }
+
 
 bool DynamicCameraManager::IsCameraRegistered(const std::string& cameraName) {
     auto camera = GetCamera(cameraName);

@@ -29,10 +29,10 @@ Each virtual webcam:
 ## Registry Settings
 
 Each camera uses its own registry path:
-- **SpoutCam**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam`
-- **SpoutCam2**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam2`  
-- **SpoutCam3**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam3`
-- **SpoutCam4**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam4`
+- **SpoutCam**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam\SpoutCam`
+- **SpoutCam2**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam\SpoutCam2`  
+- **SpoutCam3**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam\SpoutCam3`
+- **SpoutCam4**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam\SpoutCam4`
 
 This allows each camera to have independent settings for:
 - **fps** - Frame rate (10, 15, 25, 30, 50, 60 fps)

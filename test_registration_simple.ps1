@@ -70,9 +70,9 @@ if (Test-Path $dllPath32) {
 # Test 4: Check for dynamic camera registry entries
 Write-Host "`n4. Checking dynamic camera registry entries..." -ForegroundColor Yellow
 
-$dynamicCameraPath = "HKCU:\Software\Leading Edge\SpoutCam\DynamicCameras"
+$dynamicCameraPath = "HKCU:\Software\Leading Edge\SpoutCam"
 if (Test-Path $dynamicCameraPath) {
-    $cameras = Get-ChildItem $dynamicCameraPath -ErrorAction SilentlyContinue
+    $cameras = Get-ChildItem $dynamicCameraPath -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match "SpoutCam" }
     if ($cameras) {
         Write-Host "   Found $($cameras.Count) dynamic camera(s):" -ForegroundColor Green
         $cameras | ForEach-Object {

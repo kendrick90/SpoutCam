@@ -211,7 +211,7 @@ bool WriteBinaryToRegistry(HKEY hKey, const char* subkey, const char* valuename,
 void DeleteCameraConfiguration(const char* cameraName)
 {
     char keyName[256];
-    sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam\\Cameras\\%s", cameraName);
+    sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam\\%s", cameraName);
     
     LOG("Deleting configuration for camera '%s' (registry key: %s)\n", cameraName, keyName);
     
@@ -487,12 +487,28 @@ void AutoRefreshCameraList(HWND hListView)
         }
         
         LOG("Camera state changed, updating list display\n");
+        
+        // Save focus state before auto-refresh update
+        HWND hCurrentFocus = GetFocus();
+        
         PopulateCameraList(hListView);
+        
+        // Restore focus if it was stolen during auto-refresh
+        if (hCurrentFocus && GetFocus() != hCurrentFocus) {
+            SetFocus(hCurrentFocus);
+        }
     }
 }
 
 void PopulateCameraList(HWND hListView)
 {
+    // Save current focus and selection state before refresh
+    HWND hCurrentFocus = GetFocus();
+    int selectedItem = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
+    
+    // Prevent UI notifications during update to avoid focus stealing
+    SendMessage(hListView, WM_SETREDRAW, FALSE, 0);
+    
     // Scan for registered filters and dynamic cameras
     ScanRegisteredFilters();
     ScanDynamicCameras();
@@ -536,6 +552,22 @@ void PopulateCameraList(HWND hListView)
         ListView_SetItemText(hListView, itemIndex, 1, (LPSTR)"Click 'Add New Camera' to start");
         ListView_SetItemText(hListView, itemIndex, 2, (LPSTR)"--");
     }
+    
+    // Re-enable drawing and restore focus/selection
+    SendMessage(hListView, WM_SETREDRAW, TRUE, 0);
+    
+    // Restore selection if the item still exists
+    if (selectedItem >= 0 && selectedItem < ListView_GetItemCount(hListView)) {
+        ListView_SetItemState(hListView, selectedItem, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    }
+    
+    // Restore focus to previous control if it wasn't the listview
+    if (hCurrentFocus && hCurrentFocus != hListView) {
+        SetFocus(hCurrentFocus);
+    }
+    
+    // Force listview to redraw with restored state
+    InvalidateRect(hListView, NULL, TRUE);
 }
 
 // New dynamic camera registration function
@@ -1230,7 +1262,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                 int unregisterFailCount = 0;
                                 int configDeletedCount = 0;
                                 
-                                // Unregister all 8 cameras and delete their configurations
+                                // Unregister all 8 legacy cameras and delete their configurations
                                 for (int i = 0; i < 8; i++) {
                                     LOG("Cleaning up SpoutCam%d...\n", i + 1);
                                     
@@ -1249,6 +1281,30 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                         configDeletedCount++;
                                     }
                                 }
+                                
+                                // Also clean up all dynamic cameras and their settings
+                                auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+                                auto dynamicCameras = manager->GetAllCameras();
+                                for (auto camera : dynamicCameras) {
+                                    LOG("Cleaning up dynamic camera '%s'...\n", camera->name.c_str());
+                                    
+                                    // Unregister DirectShow filter if registered
+                                    if (camera->isRegistered) {
+                                        if (UnregisterCameraByName(camera->name)) {
+                                            unregisterSuccessCount++;
+                                        } else {
+                                            unregisterFailCount++;
+                                        }
+                                    }
+                                    
+                                    // Delete all registry data for this camera
+                                    if (manager->DeleteCameraFromRegistry(camera->name)) {
+                                        configDeletedCount++;
+                                    }
+                                }
+                                
+                                // Clear and reload manager to reflect deletions
+                                SpoutCam::DynamicCameraManager::Cleanup();
                                 
                                 // Force refresh to show updated status
                                 g_filtersScanned = false;
@@ -1303,9 +1359,16 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
         case WM_TIMER:
             {
                 if (wParam == TIMER_AUTO_REFRESH) {
-                    // Perform auto-refresh - but only if dialog is visible
+                    // Perform auto-refresh - but only if dialog is visible and not in active use
                     if (IsWindowVisible(hDlg)) {
-                        AutoRefreshCameraList(hListView);
+                        // Check if user is actively interacting (mouse captured or key pressed recently)
+                        HWND hFocused = GetFocus();
+                        HWND hCapture = GetCapture();
+                        
+                        // Only auto-refresh if no controls have capture and we're not in the middle of user interaction
+                        if (!hCapture) {
+                            AutoRefreshCameraList(hListView);
+                        }
                     }
                 }
             }
