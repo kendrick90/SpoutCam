@@ -243,6 +243,15 @@ CUnknown * WINAPI CreatePropertyPageInstance(LPUNKNOWN lpunk, HRESULT *phr) {
     logOutput("lpunk = %p\n", lpunk);
     
     // Try to determine which camera this property page is for
+    // First check if there's a selected camera name in registry
+    char selectedCameraName[256] = {0};
+    if (ReadPathFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraName", selectedCameraName)) {
+        std::string cameraName = selectedCameraName;
+        logOutput("SUCCESS: Found selected camera in registry: '%s'\n", cameraName.c_str());
+        if (logFile) fclose(logFile);
+        return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, cameraName);
+    }
+    
     auto manager = SpoutCam::DynamicCameraManager::GetInstance();
     auto cameras = manager->GetAllCameras();
     

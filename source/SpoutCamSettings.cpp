@@ -1361,6 +1361,12 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                 g_filtersScanned = false;
                                 g_camerasScanned = false;
                                 SpoutCam::DynamicCameraManager::Cleanup();
+                                
+                                // Brief delay to allow registry operations to complete
+                                Sleep(100);
+                                
+                                // Force a fresh manager instance and refresh
+                                SpoutCam::DynamicCameraManager::Cleanup();
                                 RefreshCameraList(hListView);
                                 
                                 // Show summary
