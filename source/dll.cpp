@@ -1044,15 +1044,47 @@ HRESULT RegisterPrimaryCameraFilter( BOOL bRegister )
 // see http://msdn.microsoft.com/en-us/library/windows/desktop/dd376682%28v=vs.85%29.aspx
 STDAPI DllRegisterServer()
 {
-	// Register only one primary SpoutCam filter - virtual cameras handled at runtime
-	// This avoids multiple CLSID registrations in VideoInputDeviceCategory
-	return RegisterPrimaryCameraFilter(TRUE);
+	// Register only the COM server - individual cameras handled at runtime via SpoutCamSettings
+	// This avoids duplicate registrations in VideoInputDeviceCategory
+    HRESULT hr = NOERROR;
+    WCHAR achFileName[MAX_PATH];
+	
+	if (0 == GetModuleFileNameW(g_hInst, achFileName, MAX_PATH))
+	{
+		return AmHresultFromWin32(GetLastError());
+	}
+
+    hr = CoInitialize(0);
+    
+    if(SUCCEEDED(hr))
+    {
+        // Register only the COM server components - no DirectShow filters
+        hr = AMovieSetupRegisterServer(CLSID_SpoutCam_Primary, L"SpoutCam", achFileName, L"Both", L"InprocServer32");
+        
+        if (SUCCEEDED(hr)) {
+            // Register single property page
+            hr = AMovieSetupRegisterServer(CLSID_SpoutCam_PropPage_Primary, L"SpoutCam Settings", achFileName, L"Both", L"InprocServer32");
+        }
+    }
+    
+    CoUninitialize();
+    return hr;
 }
 
 STDAPI DllUnregisterServer()
 {
-	// Unregister only the primary SpoutCam filter
-	return RegisterPrimaryCameraFilter(FALSE);
+	// Unregister only the COM server components - individual cameras handled by SpoutCamSettings
+    HRESULT hr = CoInitialize(0);
+    
+    if(SUCCEEDED(hr))
+    {
+        // Unregister only the COM server components
+        AMovieSetupUnregisterServer(CLSID_SpoutCam_Primary);
+        AMovieSetupUnregisterServer(CLSID_SpoutCam_PropPage_Primary);
+    }
+    
+    CoUninitialize();
+    return hr;
 }
 
 // External functions for single camera registration

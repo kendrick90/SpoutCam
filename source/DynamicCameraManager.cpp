@@ -10,7 +10,7 @@ DynamicCameraManager* DynamicCameraManager::s_instance = nullptr;
 
 // Base CLSIDs - these will be modified based on camera name to generate unique CLSIDs
 const GUID DynamicCameraManager::BASE_CAMERA_CLSID = 
-    {0x8e14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x00}};
+    {0xEF14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x00}};
 const GUID DynamicCameraManager::BASE_PROPPAGE_CLSID = 
     {0xcd7780b7, 0x40d2, 0x4f33, {0x80, 0xe2, 0xb0, 0x2e, 0x00, 0x9c, 0xe6, 0x00}};
 
@@ -30,28 +30,33 @@ void DynamicCameraManager::Cleanup() {
 }
 
 void DynamicCameraManager::HashStringToGuid(const std::string& str, GUID& guid) {
-    // Simple hash function to generate consistent GUIDs from strings
-    // This ensures the same camera name always generates the same CLSID
+    // Generate CLSIDs following original SpoutCam pattern for consistent DirectShow sorting
+    // Original pattern: increment only the last byte like {8E14549A-...-E933}, {8E14549A-...-E934}
     
-    // Start with base GUID
-    guid = BASE_CAMERA_CLSID;
+    // Start with original base GUID (matches upstream/master)
+    guid = {0x8e14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x33}};
     
-    // Use simple hash to modify the last 8 bytes
-    size_t hash1 = std::hash<std::string>{}(str);
-    size_t hash2 = std::hash<std::string>{}(str + "_salt");
+    // Use Data2, Data3, and Data4 for better uniqueness (12 bytes total = 96 bits)
+    // Format: 8E14549A-XXXX-YYYY-AFA1-3578E927ZZZZ
     
-    // Modify Data4 array with hash values
-    guid.Data4[0] = (hash1 >> 0) & 0xFF;
-    guid.Data4[1] = (hash1 >> 8) & 0xFF;
-    guid.Data4[2] = (hash1 >> 16) & 0xFF;
-    guid.Data4[3] = (hash1 >> 24) & 0xFF;
-    guid.Data4[4] = (hash2 >> 0) & 0xFF;
-    guid.Data4[5] = (hash2 >> 8) & 0xFF;
-    guid.Data4[6] = (hash2 >> 16) & 0xFF;
-    guid.Data4[7] = (hash2 >> 24) & 0xFF;
+    // Create hash from camera name
+    uint64_t hash = 0;
+    for (size_t i = 0; i < str.length(); i++) {
+        hash = hash * 31 + (uint8_t)str[i];
+    }
+    hash ^= (uint64_t)str.length() << 56;  // Include length
     
-    // Also modify Data1 for more uniqueness
-    guid.Data1 ^= (DWORD)hash1;
+    // Use Data2 (16 bits)
+    guid.Data2 = (uint16_t)(hash & 0xFFFF);
+    
+    // Use Data3 (16 bits) 
+    guid.Data3 = (uint16_t)((hash >> 16) & 0xFFFF);
+    
+    // Use last 4 bytes of Data4 for remaining hash bits
+    guid.Data4[4] = (uint8_t)((hash >> 32) & 0xFF);
+    guid.Data4[5] = (uint8_t)((hash >> 40) & 0xFF);
+    guid.Data4[6] = (uint8_t)((hash >> 48) & 0xFF);
+    guid.Data4[7] = (uint8_t)((hash >> 56) & 0xFF);
 }
 
 GUID DynamicCameraManager::GenerateCameraClsid(const std::string& cameraName) {
