@@ -408,9 +408,6 @@ HRESULT CSpoutCamProperties::OnActivate()
 	// Initialize Enhanced UI Elements
 	////////////////////////////////////////
 	
-	// Set the camera name display
-	InitializeCameraName();
-	
 	// Populate the available senders list
 	PopulateAvailableSenders();
 
@@ -732,38 +729,7 @@ STDMETHODIMP CSpoutCamProperties::GetPageInfo(LPPROPPAGEINFO pPageInfo)
 }
 
 // Initialize the camera name display
-void CSpoutCamProperties::InitializeCameraName()
-{
-	// Update the camera name label in the dialog to show the specific camera
-	HWND hwndName = GetDlgItem(this->m_Dlg, IDC_CAMERA_NAME);
-	if (hwndName) {
-		WCHAR cameraName[256];
-		
-		// Try to read custom camera name from registry
-		bool foundCustomName = false;
-		
-		// Check if there's a selected camera index and name in registry
-		DWORD selectedCameraIndex = 0;
-		char customName[256] = "";
-		
-		if (ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraIndex", &selectedCameraIndex) &&
-			selectedCameraIndex == m_cameraIndex &&
-			ReadPathFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraName", customName)) {
-			
-			if (strlen(customName) > 0) {
-				MultiByteToWideChar(CP_ACP, 0, customName, -1, cameraName, 256);
-				foundCustomName = true;
-			}
-		}
-		
-		// Fallback to default naming if no custom name found
-		if (!foundCustomName) {
-			swprintf_s(cameraName, 256, L"SpoutCam%d", m_cameraIndex + 1);
-		}
-		
-		Static_SetText(hwndName, cameraName);
-	}
-}
+// Function removed - camera name label control was removed from UI
 
 // Populate the sender list with available Spout senders
 void CSpoutCamProperties::PopulateAvailableSenders()

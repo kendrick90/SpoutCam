@@ -37,7 +37,6 @@ private:
 	std::string m_cameraName;       // Name of the camera this dialog represents
 	
 	// Helper methods for enhanced UI
-	void InitializeCameraName();
 	void RefreshSenderList();
 	void PopulateAvailableSenders();
 	HRESULT GetCameraIndex(int* pCameraIndex);
