@@ -567,14 +567,17 @@ bool RegisterCameraByName(const std::string& cameraName)
         return false;
     }
     
-    // Get the DLL registration function
-    typedef HRESULT (STDAPICALLTYPE *DllRegisterServerFunc)();
-    DllRegisterServerFunc registerFunc = 
-        (DllRegisterServerFunc)GetProcAddress(hDll, "DllRegisterServer");
+    // Get the specific camera registration function
+    typedef HRESULT (STDAPICALLTYPE *RegisterCameraByNameFunc)(const char*);
+    RegisterCameraByNameFunc registerFunc = 
+        (RegisterCameraByNameFunc)GetProcAddress(hDll, "RegisterCameraByName");
     
     HRESULT hr = E_FAIL;
     if (registerFunc) {
-        hr = registerFunc();
+        hr = registerFunc(cameraName.c_str());
+        LOG("Called RegisterCameraByName('%s') -> 0x%08X\n", cameraName.c_str(), hr);
+    } else {
+        LOG("Failed to find RegisterCameraByName function in DLL\n");
     }
     
     FreeLibrary(hDll);
@@ -674,14 +677,17 @@ bool UnregisterCameraByName(const std::string& cameraName)
         return false;
     }
     
-    // Get the DLL unregistration function
-    typedef HRESULT (STDAPICALLTYPE *DllUnregisterServerFunc)();
-    DllUnregisterServerFunc unregisterFunc = 
-        (DllUnregisterServerFunc)GetProcAddress(hDll, "DllUnregisterServer");
+    // Get the specific camera unregistration function
+    typedef HRESULT (STDAPICALLTYPE *UnregisterCameraByNameFunc)(const char*);
+    UnregisterCameraByNameFunc unregisterFunc = 
+        (UnregisterCameraByNameFunc)GetProcAddress(hDll, "UnregisterCameraByName");
     
     HRESULT hr = E_FAIL;
     if (unregisterFunc) {
-        hr = unregisterFunc();
+        hr = unregisterFunc(cameraName.c_str());
+        LOG("Called UnregisterCameraByName('%s') -> 0x%08X\n", cameraName.c_str(), hr);
+    } else {
+        LOG("Failed to find UnregisterCameraByName function in DLL\n");
     }
     
     FreeLibrary(hDll);
@@ -1015,9 +1021,18 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                             CameraCreationResult result = CreateNewCameraEx(defaultName.c_str());
                             
                             if (result == CAMERA_CREATE_SUCCESS) {
-                                // Camera was created successfully, refresh the list
-                                RefreshCameraList(hListView);
+                                // Camera was created successfully, automatically register it
                                 LOG("New camera '%s' added successfully\n", defaultName.c_str());
+                                
+                                // Automatically register the new camera so property pages work immediately
+                                if (RegisterCameraByName(defaultName)) {
+                                    LOG("New camera '%s' auto-registered successfully\n", defaultName.c_str());
+                                } else {
+                                    LOG("Failed to auto-register new camera '%s'\n", defaultName.c_str());
+                                }
+                                
+                                // Refresh the list to show the registered state
+                                RefreshCameraList(hListView);
                                 
                                 // Get cameras and find the newly created one
                                 auto manager = SpoutCam::DynamicCameraManager::GetInstance();
@@ -1147,6 +1162,26 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                             
                             if (selected != -1 && selected < (int)cameras.size()) {
                                 const std::string& cameraName = cameras[selected]->name;
+                                
+                                // Validate camera name to prevent crashes
+                                if (cameraName.empty()) {
+                                    LOG("ERROR: Attempting to remove camera with empty name at index %d\n", selected);
+                                    char errorMsg[256];
+                                    sprintf_s(errorMsg, "Cannot remove camera at position %d - corrupted camera name.\n\nWould you like to force remove this corrupted entry?", selected + 1);
+                                    int result = MessageBox(hDlg, errorMsg, "Corrupted Camera Entry", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
+                                    
+                                    if (result == IDYES) {
+                                        // Force remove the corrupted entry
+                                        auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+                                        if (manager->DeleteCamera("")) {  // Try to delete with empty name
+                                            RefreshCameraList(hListView);
+                                            LOG("Corrupted camera entry at index %d force-removed\n", selected);
+                                        } else {
+                                            LOG("Failed to force-remove corrupted camera entry at index %d\n", selected);
+                                        }
+                                    }
+                                    break;
+                                }
                                 
                                 char confirmMsg[512];
                                 sprintf_s(confirmMsg, "Are you sure you want to remove camera '%s'?\n\nThis will permanently delete the camera and all its settings.", cameraName.c_str());

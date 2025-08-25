@@ -65,6 +65,10 @@ extern "C" {
 		STDMETHOD(get_CameraIndex) (THIS_
 			int *pCameraIndex
 			) PURE;
+		STDMETHOD(get_CameraName) (THIS_
+			char *pCameraName,
+			int bufferSize
+			) PURE;
 	};
 }
 

@@ -1,7 +1,11 @@
 #include <dshow.h>
+#include <string>
+#include "DynamicCameraManager.h"
 
-// Forward declaration for single camera registration function
+// Forward declarations for camera registration functions
 HRESULT RegisterSingleCameraFilter(BOOL bRegister, int cameraIndex);
+STDAPI RegisterCameraByName(const char* cameraName);
+STDAPI UnregisterCameraByName(const char* cameraName);
 
 class CSpoutCamProperties : public CBasePropertyPage
 {
@@ -9,6 +13,8 @@ class CSpoutCamProperties : public CBasePropertyPage
 public:
 
 	static CUnknown * WINAPI CreateInstance(LPUNKNOWN lpunk, HRESULT *phr);
+	// Camera-specific factory function that knows which camera it represents
+	static CUnknown * WINAPI CreateInstanceForCamera(LPUNKNOWN lpunk, HRESULT *phr, const std::string& cameraName);
 
 private:
 
@@ -26,6 +32,7 @@ private:
 	BOOL m_bSilent;                 // Disable warnings mode
 	ICamSettings *m_pCamSettings;   // The custom interface on the filter
 	int m_cameraIndex;              // Index of the camera instance this dialog is configuring
+	std::string m_cameraName;       // Name of the camera this dialog represents
 	
 	// Helper methods for enhanced UI
 	void InitializeCameraName();
@@ -33,6 +40,7 @@ private:
 	void PopulateAvailableSenders();
 	HRESULT GetCameraIndex(int* pCameraIndex);
 	void SetRegistryPath(char* registryPath, int cameraIndex);
+	void GetCameraRegistryPath(char* registryPath, size_t bufferSize);
 	void UpdateCameraName(const char* newName);
 	void LoadCameraName();
 	
@@ -41,6 +49,8 @@ private:
 	void UnregisterCameras();
 	void RegisterSingleCamera(int cameraIndex);
 	void UnregisterSingleCamera(int cameraIndex);
+	void RegisterCurrentCamera();
+	void UnregisterCurrentCamera();
 	
 	// Tab control methods for multi-camera management
 	void InitializeTabControl();

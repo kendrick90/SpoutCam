@@ -151,10 +151,29 @@ CUnknown * WINAPI CreateCameraByIndex(int index, LPUNKNOWN lpunk, HRESULT *phr) 
     return nullptr;
 }
 
+// Property page factory function wrapper that finds camera by index
+CUnknown * WINAPI CreatePropertyPageByIndex(int index, LPUNKNOWN lpunk, HRESULT *phr) {
+    if (index >= 0 && index < (int)g_DynamicCameraConfigs.size()) {
+        auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+        auto cameras = manager->GetAllCameras();
+        if (index < (int)cameras.size()) {
+            return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, cameras[index]->name);
+        }
+    }
+    *phr = E_FAIL;
+    return nullptr;
+}
+
 // Individual factory functions for each potential camera (DirectShow needs static functions)
 #define MAKE_CAMERA_FACTORY(n) \
 CUnknown * WINAPI CreateCamera##n(LPUNKNOWN lpunk, HRESULT *phr) { \
     return CreateCameraByIndex(n, lpunk, phr); \
+}
+
+// Individual property page factory functions
+#define MAKE_PROPPAGE_FACTORY(n) \
+CUnknown * WINAPI CreatePropertyPage##n(LPUNKNOWN lpunk, HRESULT *phr) { \
+    return CreatePropertyPageByIndex(n, lpunk, phr); \
 }
 
 // Generate factory functions for up to 128 cameras
@@ -163,12 +182,26 @@ MAKE_CAMERA_FACTORY(4)  MAKE_CAMERA_FACTORY(5)  MAKE_CAMERA_FACTORY(6)  MAKE_CAM
 MAKE_CAMERA_FACTORY(8)  MAKE_CAMERA_FACTORY(9)  MAKE_CAMERA_FACTORY(10) MAKE_CAMERA_FACTORY(11)
 MAKE_CAMERA_FACTORY(12) MAKE_CAMERA_FACTORY(13) MAKE_CAMERA_FACTORY(14) MAKE_CAMERA_FACTORY(15)
 
+// Generate property page factory functions for up to 16 cameras 
+MAKE_PROPPAGE_FACTORY(0)  MAKE_PROPPAGE_FACTORY(1)  MAKE_PROPPAGE_FACTORY(2)  MAKE_PROPPAGE_FACTORY(3)
+MAKE_PROPPAGE_FACTORY(4)  MAKE_PROPPAGE_FACTORY(5)  MAKE_PROPPAGE_FACTORY(6)  MAKE_PROPPAGE_FACTORY(7)
+MAKE_PROPPAGE_FACTORY(8)  MAKE_PROPPAGE_FACTORY(9)  MAKE_PROPPAGE_FACTORY(10) MAKE_PROPPAGE_FACTORY(11)
+MAKE_PROPPAGE_FACTORY(12) MAKE_PROPPAGE_FACTORY(13) MAKE_PROPPAGE_FACTORY(14) MAKE_PROPPAGE_FACTORY(15)
+
 // Array of factory function pointers
 static LPFNNewCOMObject g_CameraFactories[] = {
     CreateCamera0,  CreateCamera1,  CreateCamera2,  CreateCamera3,
     CreateCamera4,  CreateCamera5,  CreateCamera6,  CreateCamera7,
     CreateCamera8,  CreateCamera9,  CreateCamera10, CreateCamera11,
     CreateCamera12, CreateCamera13, CreateCamera14, CreateCamera15
+};
+
+// Array of property page factory function pointers
+static LPFNNewCOMObject g_PropertyPageFactories[] = {
+    CreatePropertyPage0,  CreatePropertyPage1,  CreatePropertyPage2,  CreatePropertyPage3,
+    CreatePropertyPage4,  CreatePropertyPage5,  CreatePropertyPage6,  CreatePropertyPage7,
+    CreatePropertyPage8,  CreatePropertyPage9,  CreatePropertyPage10, CreatePropertyPage11,
+    CreatePropertyPage12, CreatePropertyPage13, CreatePropertyPage14, CreatePropertyPage15
 };
 
 // Initialize templates dynamically
@@ -190,7 +223,7 @@ void InitializeTemplates() {
         // Property page template
         g_Templates[g_cTemplates].m_Name = L"Settings";
         g_Templates[g_cTemplates].m_ClsID = &g_DynamicCameraConfigs[i].propPageClsid;
-        g_Templates[g_cTemplates].m_lpfnNew = CSpoutCamProperties::CreateInstance;
+        g_Templates[g_cTemplates].m_lpfnNew = g_PropertyPageFactories[i];
         g_Templates[g_cTemplates].m_lpfnInit = nullptr;
         g_Templates[g_cTemplates].m_pAMovieSetup_Filter = nullptr;
         g_cTemplates++;
@@ -275,9 +308,81 @@ STDAPI RegisterFilters( BOOL bRegister )
     return hr;
 }
 
+// New camera name-based registration functions
+STDAPI RegisterCameraByName(const char* cameraName)
+{
+    printf("RegisterCameraByName: Starting registration for camera '%s'\n", cameraName ? cameraName : "NULL");
+    
+    if (!cameraName) {
+        printf("RegisterCameraByName: ERROR - cameraName is NULL\n");
+        return E_INVALIDARG;
+    }
+    
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    if (!manager) {
+        printf("RegisterCameraByName: ERROR - Could not get DynamicCameraManager instance\n");
+        return E_FAIL;
+    }
+    
+    auto camera = manager->GetCamera(cameraName);
+    if (!camera) {
+        printf("RegisterCameraByName: ERROR - Camera '%s' not found in manager\n", cameraName);
+        printf("RegisterCameraByName: Available cameras:\n");
+        auto allCameras = manager->GetAllCameras();
+        for (size_t j = 0; j < allCameras.size(); j++) {
+            printf("  [%d] %s\n", (int)j, allCameras[j]->name.c_str());
+        }
+        return E_FAIL;
+    }
+    
+    printf("RegisterCameraByName: Found camera '%s' in manager\n", cameraName);
+    printf("RegisterCameraByName: Camera CLSID: {%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}\n",
+        camera->clsid.Data1, camera->clsid.Data2, camera->clsid.Data3,
+        camera->clsid.Data4[0], camera->clsid.Data4[1], camera->clsid.Data4[2], camera->clsid.Data4[3],
+        camera->clsid.Data4[4], camera->clsid.Data4[5], camera->clsid.Data4[6], camera->clsid.Data4[7]);
+    
+    // Find the camera index for compatibility with existing system
+    auto allCameras = manager->GetAllCameras();
+    for (int i = 0; i < (int)allCameras.size(); i++) {
+        if (allCameras[i] == camera) {
+            printf("RegisterCameraByName: Found camera at index %d, calling RegisterSingleCameraFilter\n", i);
+            HRESULT hr = RegisterSingleCameraFilter(TRUE, i);
+            printf("RegisterCameraByName: RegisterSingleCameraFilter returned 0x%08X (%s)\n", 
+                hr, SUCCEEDED(hr) ? "SUCCESS" : "FAILED");
+            return hr;
+        }
+    }
+    
+    printf("RegisterCameraByName: ERROR - Could not find camera index\n");
+    return E_FAIL;
+}
+
+STDAPI UnregisterCameraByName(const char* cameraName)
+{
+    if (!cameraName) return E_INVALIDARG;
+    
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    auto camera = manager->GetCamera(cameraName);
+    
+    if (!camera) return E_FAIL;
+    
+    // Find the camera index for compatibility with existing system
+    auto allCameras = manager->GetAllCameras();
+    for (int i = 0; i < (int)allCameras.size(); i++) {
+        if (allCameras[i] == camera) {
+            return RegisterSingleCameraFilter(FALSE, i);
+        }
+    }
+    
+    return E_FAIL;
+}
+
 HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
 {
-	ASSERT(g_hInst != 0);
+	printf("RegisterSingleCameraFilter: Called with bRegister=%s, cameraIndex=%d\n", 
+        bRegister ? "TRUE" : "FALSE", cameraIndex);
+    
+    ASSERT(g_hInst != 0);
 
     HRESULT hr = NOERROR;
     WCHAR achFileName[MAX_PATH];
@@ -290,24 +395,47 @@ HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
 	//<==================== VS-END ======================>
 
     hr = CoInitialize(0);
+    printf("RegisterSingleCameraFilter: CoInitialize returned 0x%08X\n", hr);
+    
     if(bRegister)
     {
         // Refresh camera names from registry before registration
+        printf("RegisterSingleCameraFilter: Calling InitializeFilterSetups()\n");
         InitializeFilterSetups();
+        printf("RegisterSingleCameraFilter: After InitializeFilterSetups, g_DynamicCameraConfigs.size() = %d\n", 
+            (int)g_DynamicCameraConfigs.size());
         
         if (cameraIndex >= 0 && cameraIndex < (int)g_DynamicCameraConfigs.size()) {
             // Register single camera and its property page
+            printf("RegisterSingleCameraFilter: Registering single camera at index %d\n", cameraIndex);
+            printf("RegisterSingleCameraFilter: Camera name: '%s'\n", CameraNames[cameraIndex].c_str());
+            printf("RegisterSingleCameraFilter: Camera CLSID: {%08X-%04X-%04X-...}\n", 
+                g_DynamicCameraConfigs[cameraIndex].clsid.Data1, 
+                g_DynamicCameraConfigs[cameraIndex].clsid.Data2, 
+                g_DynamicCameraConfigs[cameraIndex].clsid.Data3);
+            
             hr = AMovieSetupRegisterServer(g_DynamicCameraConfigs[cameraIndex].clsid, CameraNames[cameraIndex].c_str(), achFileName, L"Both", L"InprocServer32");
+            printf("RegisterSingleCameraFilter: Camera CLSID registration returned 0x%08X (%s)\n", 
+                hr, SUCCEEDED(hr) ? "SUCCESS" : "FAILED");
+                
             if (SUCCEEDED(hr)) {
                 hr = AMovieSetupRegisterServer(g_DynamicCameraConfigs[cameraIndex].propPageClsid, L"Settings", achFileName, L"Both", L"InprocServer32");
+                printf("RegisterSingleCameraFilter: Property page CLSID registration returned 0x%08X (%s)\n", 
+                    hr, SUCCEEDED(hr) ? "SUCCESS" : "FAILED");
             }
         } else {
+            printf("RegisterSingleCameraFilter: ERROR - cameraIndex %d is out of range (0-%d)\n", 
+                cameraIndex, (int)g_DynamicCameraConfigs.size() - 1);
             // Register all cameras and their property pages
+            printf("RegisterSingleCameraFilter: Falling back to registering all cameras\n");
             for (size_t i = 0; i < g_DynamicCameraConfigs.size() && SUCCEEDED(hr); i++) {
+                printf("RegisterSingleCameraFilter: Registering camera %d: '%s'\n", 
+                    (int)i, CameraNames[i].c_str());
                 hr = AMovieSetupRegisterServer(g_DynamicCameraConfigs[i].clsid, CameraNames[i].c_str(), achFileName, L"Both", L"InprocServer32");
                 if (SUCCEEDED(hr)) {
                     hr = AMovieSetupRegisterServer(g_DynamicCameraConfigs[i].propPageClsid, L"Settings", achFileName, L"Both", L"InprocServer32");
                 }
+                printf("RegisterSingleCameraFilter: Camera %d registration result: 0x%08X\n", (int)i, hr);
             }
         }
     }
@@ -527,7 +655,8 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCameraFromFil
 	HRESULT hr;
 	IBaseFilter *pFilter;
 	CUnknown *pInstance;
-	int cameraIndex = 0;
+	std::string cameraName;
+	SpoutCam::DynamicCameraConfig* cameraConfig = nullptr;
 
 	// Allocate console for debugging
 	AllocConsole();
@@ -537,24 +666,50 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCameraFromFil
 	
 	printf("=== ConfigureSpoutCameraFromFile Debug Session ===\n");
 	
-	// Read camera index from registry
-	DWORD dwCameraIndex = 0;
-	if (ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraIndex", &dwCameraIndex)) {
-		cameraIndex = (int)dwCameraIndex;
-		printf("Read camera index from registry: %d\n", cameraIndex);
+	// Read camera name from registry (preferred method)
+	char selectedCameraName[256] = {0};
+	if (ReadPathFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraName", selectedCameraName)) {
+		cameraName = selectedCameraName;
+		printf("Read camera name from registry: '%s'\n", cameraName.c_str());
 	} else {
-		printf("Could not read camera index from registry, using default camera 0\n");
-		cameraIndex = 0;
+		// Fallback: get first available camera or use command line parameter
+		if (lpszCmdLine && strlen(lpszCmdLine) > 0) {
+			cameraName = lpszCmdLine;
+			printf("Using camera name from command line: '%s'\n", cameraName.c_str());
+		} else {
+			// Get first available camera
+			auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+			auto cameras = manager->GetAllCameras();
+			if (!cameras.empty()) {
+				cameraName = cameras[0]->name;
+				printf("No camera specified, using first available camera: '%s'\n", cameraName.c_str());
+			} else {
+				printf("ERROR: No cameras available in system\n");
+				printf("Press any key to exit...\n");
+				_getch();
+				CoUninitialize();
+				return;
+			}
+		}
 	}
 	
-	// Validate camera index
-	if (cameraIndex < 0 || cameraIndex >= (int)g_DynamicCameraConfigs.size()) {
-		printf("ERROR: Invalid camera index %d (valid range: 0-%d)\n", cameraIndex, (int)g_DynamicCameraConfigs.size()-1);
-		printf("Using camera 0 instead\n");
-		cameraIndex = 0;
+	// Get camera configuration from DynamicCameraManager
+	auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+	cameraConfig = manager->GetCamera(cameraName);
+	if (!cameraConfig) {
+		printf("ERROR: Camera '%s' not found in system\n", cameraName.c_str());
+		printf("Available cameras:\n");
+		auto cameras = manager->GetAllCameras();
+		for (auto camera : cameras) {
+			printf("  - %s\n", camera->name.c_str());
+		}
+		printf("Press any key to exit...\n");
+		_getch();
+		CoUninitialize();
+		return;
 	}
 	
-	printf("ConfigureSpoutCameraFromFile: Starting configuration for camera %d\n", cameraIndex);
+	printf("ConfigureSpoutCameraFromFile: Starting configuration for camera '%s'\n", cameraName.c_str());
 
 	hr = CoInitialize(nullptr);
 	if (FAILED(hr)) {
@@ -566,14 +721,9 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCameraFromFil
 	printf("ConfigureSpoutCameraFromFile: CoInitialize succeeded\n");
 
 	// Create the specific camera instance
-	printf("ConfigureSpoutCameraFromFile: Creating camera instance %d...\n", cameraIndex);
-	if (cameraIndex >= 0 && cameraIndex < (int)g_DynamicCameraConfigs.size()) {
-		pInstance = CVCam::CreateCameraInstance(nullptr, &hr, g_DynamicCameraConfigs[cameraIndex].clsid);
-	} else {
-		printf("ConfigureSpoutCameraFromFile: Invalid camera index\n");
-		hr = E_FAIL;
-		pInstance = nullptr;
-	}
+	printf("ConfigureSpoutCameraFromFile: Creating camera instance for '%s'...\n", cameraName.c_str());
+	pInstance = CVCam::CreateCameraInstance(nullptr, &hr, cameraConfig->clsid);
+	
 	if (SUCCEEDED(hr))
 	{
 		printf("ConfigureSpoutCameraFromFile: Camera instance created successfully\n");
@@ -589,28 +739,54 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCameraFromFil
 				printf("ConfigureSpoutCameraFromFile: Filter supports property pages\n");
 				pProp->Release();
 				
-				// Try to show property page using DirectShow method
+				// Try to open property page using standard DirectShow method
 				printf("ConfigureSpoutCameraFromFile: Opening property page...\n");
 				hr = ShowFilterPropertyPage(pFilter, GetDesktopWindow());
 				if (SUCCEEDED(hr)) {
 					printf("ConfigureSpoutCameraFromFile: Property page opened successfully\n");
 				} else {
 					printf("ConfigureSpoutCameraFromFile: ShowFilterPropertyPage failed with HRESULT 0x%08X\n", hr);
-					printf("ConfigureSpoutCameraFromFile: This usually means no SpoutCam cameras are registered in the system\n");
-					printf("ConfigureSpoutCameraFromFile: Solution: Register at least one camera first, then configuration will work\n");
-					printf("ConfigureSpoutCameraFromFile: Use SpoutCamSettings.exe to register cameras\n");
+					printf("ConfigureSpoutCameraFromFile: Trying alternative approach with specific camera CLSID...\n");
 					
-					// Show user-friendly error message
-					MessageBoxA(GetDesktopWindow(), 
-						"Cannot open camera configuration.\n\n"
-						"This happens when no SpoutCam cameras are registered in the system.\n\n"
-						"Solution:\n"
-						"1. Open SpoutCamSettings.exe\n"
-						"2. Click 'Register' for at least one camera\n"
-						"3. Then 'Configure' will work for all cameras\n\n"
-						"Once any camera is registered, you can configure any camera (even unregistered ones).",
-						"SpoutCam Configuration Error", 
-						MB_OK | MB_ICONINFORMATION);
+					// Try using the specific camera's property page CLSID
+					auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+					auto cameraConfig = manager->GetCamera(cameraName);
+					
+					if (cameraConfig) {
+						printf("ConfigureSpoutCameraFromFile: Using property page CLSID for camera '%s'\n", cameraName);
+						hr = OleCreatePropertyFrame(
+							GetDesktopWindow(),						// Parent window
+							0, 0,									// Reserved
+							L"SpoutCam Properties",					// Caption
+							1,										// Number of objects
+							(IUnknown**)&pFilter,					// Array of objects
+							1,										// Number of pages
+							&cameraConfig->propPageClsid,			// Array of page CLSIDs
+							0,										// Locale ID
+							0,										// Reserved
+							NULL									// Reserved
+						);
+						if (SUCCEEDED(hr)) {
+							printf("ConfigureSpoutCameraFromFile: OleCreatePropertyFrame succeeded\n");
+						} else {
+							printf("ConfigureSpoutCameraFromFile: OleCreatePropertyFrame also failed with HRESULT 0x%08X\n", hr);
+						}
+					} else {
+						printf("ConfigureSpoutCameraFromFile: Could not find camera configuration for '%s'\n", cameraName);
+					}
+				}
+					
+					// If both methods failed, show the original error message
+					if (FAILED(hr)) {
+						MessageBoxA(GetDesktopWindow(), 
+							"Cannot open camera configuration.\n\n"
+							"This happens when property page CLSIDs are not properly registered.\n\n"
+							"Solution:\n"
+							"1. Try re-registering the camera using SpoutCamSettings.exe\n"
+							"2. If problem persists, restart the application\n\n"
+							"The camera filter is registered but property pages may need re-registration.",
+							"SpoutCam Configuration Error", 
+							MB_OK | MB_ICONINFORMATION);
 				}
 			} else {
 				printf("ConfigureSpoutCameraFromFile: Filter does not support property pages, HRESULT 0x%08X\n", hr);

@@ -30,7 +30,8 @@ class DynamicCameraManager {
 private:
     static DynamicCameraManager* s_instance;
     std::map<std::string, DynamicCameraConfig> m_cameras;
-    std::map<std::string, std::string> m_clsidToName; // GUID string -> camera name
+    std::map<std::string, std::string> m_clsidToName; // GUID string -> camera name (for camera CLSIDs)
+    std::map<std::string, std::string> m_propPageClsidToName; // GUID string -> camera name (for prop page CLSIDs)
     
     // Base CLSIDs for generation
     static const GUID BASE_CAMERA_CLSID;
@@ -50,6 +51,7 @@ public:
     DynamicCameraConfig* CreateCamera(const std::string& cameraName);
     DynamicCameraConfig* GetCamera(const std::string& cameraName);
     DynamicCameraConfig* GetCameraByCLSID(const GUID& clsid);
+    DynamicCameraConfig* GetCameraByPropPageCLSID(const GUID& propPageClsid);
     bool DeleteCamera(const std::string& cameraName);
     
     // Get all cameras

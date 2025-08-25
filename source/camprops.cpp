@@ -33,12 +33,31 @@ CUnknown *CSpoutCamProperties::CreateInstance(LPUNKNOWN lpunk, HRESULT *phr)
 	return punk;
 } // CreateInstance
 
+// Camera-specific factory function that knows which camera it represents
+CUnknown *CSpoutCamProperties::CreateInstanceForCamera(LPUNKNOWN lpunk, HRESULT *phr, const std::string& cameraName)
+{
+	ASSERT(phr);
+	CSpoutCamProperties* props = new CSpoutCamProperties(lpunk, phr);
+	if (props == NULL)
+	{
+		if (phr)
+			*phr = E_OUTOFMEMORY;
+		return nullptr;
+	}
+	
+	// Set the camera name so the property page knows which camera it represents
+	props->m_cameraName = cameraName;
+	
+	return props;
+}
+
 // Constructor
 CSpoutCamProperties::CSpoutCamProperties(LPUNKNOWN pUnk, HRESULT *phr) :
 	CBasePropertyPage("SpoutCam Configuration", pUnk, IDD_SPOUTCAMBOX, IDS_TITLE),
 	m_pCamSettings(NULL),
 	m_bIsInitialized(FALSE),
-	m_cameraIndex(0) // Default to camera 0, will be updated in OnConnect
+	m_cameraIndex(0), // Default to camera 0, will be updated in OnConnect
+	m_cameraName("") // Will be set by camera-specific factory or determined in OnConnect
 {
 	ASSERT(phr);
 	if (phr)
@@ -282,16 +301,47 @@ HRESULT CSpoutCamProperties::OnConnect(IUnknown *pUnknown)
 	// Get the initial image FX property
 	CheckPointer(m_pCamSettings, E_FAIL);
 
-	// Get the camera index from the filter instance
-	hr = m_pCamSettings->get_CameraIndex(&m_cameraIndex);
-	if (FAILED(hr))
-	{
-		m_cameraIndex = 0; // Default to camera 0 if we can't get the index
-		OutputDebugStringA("CSpoutCamProperties: OnConnect - Failed to get camera index, using 0");
+	// If camera name was set by factory, use that to determine camera info
+	if (!m_cameraName.empty()) {
+		// Get camera config from DynamicCameraManager
+		auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+		auto cameraConfig = manager->GetCamera(m_cameraName);
+		if (cameraConfig) {
+			// Find the index for backward compatibility
+			auto allCameras = manager->GetAllCameras();
+			for (int i = 0; i < (int)allCameras.size(); i++) {
+				if (allCameras[i] == cameraConfig) {
+					m_cameraIndex = i;
+					break;
+				}
+			}
+			char debugMsg[256];
+			sprintf_s(debugMsg, "CSpoutCamProperties: OnConnect - Using camera name '%s' with index %d", m_cameraName.c_str(), m_cameraIndex);
+			OutputDebugStringA(debugMsg);
+		} else {
+			OutputDebugStringA("CSpoutCamProperties: OnConnect - Camera name set but not found in manager");
+		}
 	} else {
-		char debugMsg[128];
-		sprintf_s(debugMsg, "CSpoutCamProperties: OnConnect - Got camera index: %d", m_cameraIndex);
-		OutputDebugStringA(debugMsg);
+		// Fall back to old method - get camera index from filter instance
+		hr = m_pCamSettings->get_CameraIndex(&m_cameraIndex);
+		if (FAILED(hr))
+		{
+			m_cameraIndex = 0; // Default to camera 0 if we can't get the index
+			OutputDebugStringA("CSpoutCamProperties: OnConnect - Failed to get camera index, using 0");
+		} else {
+			// Try to get camera name from the filter
+			char cameraName[256] = {0};
+			if (SUCCEEDED(m_pCamSettings->get_CameraName(cameraName, sizeof(cameraName)))) {
+				m_cameraName = cameraName;
+				char debugMsg[256];
+				sprintf_s(debugMsg, "CSpoutCamProperties: OnConnect - Got camera index %d and name '%s'", m_cameraIndex, m_cameraName.c_str());
+				OutputDebugStringA(debugMsg);
+			} else {
+				char debugMsg[128];
+				sprintf_s(debugMsg, "CSpoutCamProperties: OnConnect - Got camera index: %d", m_cameraIndex);
+				OutputDebugStringA(debugMsg);
+			}
+		}
 	}
 
 	m_bIsInitialized = FALSE;
@@ -472,12 +522,8 @@ HRESULT CSpoutCamProperties::OnApplyChanges()
 	char name[256];
 	char keyName[256];
 
-	// Create camera-specific registry key for current camera (match cam.cpp logic)
-	if (m_cameraIndex == 0) {
-		strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
-	} else {
-		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
-	}
+	// Create camera-specific registry key using camera name
+	GetCameraRegistryPath(keyName, sizeof(keyName));
 
 	// =================================
 	// Get old fps and resolution for user warning
@@ -490,8 +536,10 @@ HRESULT CSpoutCamProperties::OnApplyChanges()
 	bool needsReregistration = false;
 	if (!m_bSilent) {
 		if (dwOldFps != dwFps || dwOldResolution != dwResolution) {
-			wchar_t warningMsg[256];
-			swprintf_s(warningMsg, L"Resolution or FPS change on SpoutCam%d requires reregistration.\n\nClick OK to automatically reregister the camera with new settings.\nClick Cancel to revert changes.", m_cameraIndex + 1);
+			wchar_t warningMsg[512];
+			wchar_t cameraDisplayName[256];
+			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
+			swprintf_s(warningMsg, L"Resolution or FPS change on %s requires reregistration.\n\nClick OK to automatically reregister the camera with new settings.\nClick Cancel to revert changes.", !m_cameraName.empty() ? cameraDisplayName : L"this camera");
 			if (MessageBoxW(NULL, warningMsg, L"Camera Reregistration Required", MB_OKCANCEL | MB_TOPMOST | MB_ICONQUESTION) == IDCANCEL) {
 				if (dwOldFps != dwFps)
 					ComboBox_SetCurSel(GetDlgItem(this->m_Dlg, IDC_FPS), dwOldFps);
@@ -577,13 +625,28 @@ HRESULT CSpoutCamProperties::GetCameraIndex(int* pCameraIndex)
 	return S_OK;
 }
 
-// Set the correct registry path based on camera index
+// Set the correct registry path based on camera index (legacy method)
 void CSpoutCamProperties::SetRegistryPath(char* registryPath, int cameraIndex)
 {
 	if (cameraIndex == 0) {
 		strcpy_s(registryPath, 256, "Software\\Leading Edge\\SpoutCam");
 	} else {
 		sprintf_s(registryPath, 256, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
+	}
+}
+
+// Get the correct registry path based on camera name (preferred method)
+void CSpoutCamProperties::GetCameraRegistryPath(char* registryPath, size_t bufferSize)
+{
+	if (!m_cameraName.empty()) {
+		sprintf_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam\\%s", m_cameraName.c_str());
+	} else {
+		// Fallback to old logic
+		if (m_cameraIndex == 0) {
+			strcpy_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam");
+		} else {
+			sprintf_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
+		}
 	}
 }
 
@@ -776,6 +839,58 @@ void CSpoutCamProperties::UnregisterSingleCamera(int cameraIndex)
 	}
 }
 
+// Register current camera using camera name
+void CSpoutCamProperties::RegisterCurrentCamera()
+{
+	if (m_cameraName.empty()) {
+		MessageBox(m_Dlg, L"Cannot register camera: camera name not available.", L"Registration Error", MB_OK | MB_ICONERROR);
+		return;
+	}
+
+	HRESULT hr = RegisterCameraByName(m_cameraName.c_str());
+	if (SUCCEEDED(hr)) {
+		if (!m_bSilent) {
+			wchar_t message[512];
+			wchar_t cameraDisplayName[256];
+			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
+			swprintf_s(message, L"%s registered successfully!", cameraDisplayName);
+			MessageBox(m_Dlg, message, L"Registration", MB_OK | MB_ICONINFORMATION);
+		}
+	} else {
+		wchar_t message[512];
+		wchar_t cameraDisplayName[256];
+		MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
+		swprintf_s(message, L"Failed to register %s.\n\nThis may require administrator privileges.", cameraDisplayName);
+		MessageBox(m_Dlg, message, L"Registration Error", MB_OK | MB_ICONERROR);
+	}
+}
+
+// Unregister current camera using camera name
+void CSpoutCamProperties::UnregisterCurrentCamera()
+{
+	if (m_cameraName.empty()) {
+		MessageBox(m_Dlg, L"Cannot unregister camera: camera name not available.", L"Unregistration Error", MB_OK | MB_ICONERROR);
+		return;
+	}
+
+	HRESULT hr = UnregisterCameraByName(m_cameraName.c_str());
+	if (SUCCEEDED(hr)) {
+		if (!m_bSilent) {
+			wchar_t message[512];
+			wchar_t cameraDisplayName[256];
+			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
+			swprintf_s(message, L"%s unregistered successfully!", cameraDisplayName);
+			MessageBox(m_Dlg, message, L"Unregistration", MB_OK | MB_ICONINFORMATION);
+		}
+	} else {
+		wchar_t message[512];
+		wchar_t cameraDisplayName[256];
+		MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
+		swprintf_s(message, L"Failed to unregister %s.\n\nThis may require administrator privileges.", cameraDisplayName);
+		MessageBox(m_Dlg, message, L"Unregistration Error", MB_OK | MB_ICONERROR);
+	}
+}
+
 // Initialize the properties dialog for a single camera
 void CSpoutCamProperties::InitializeTabControl()
 {
@@ -878,48 +993,33 @@ void CSpoutCamProperties::SaveCurrentCameraSettings()
 	char name[256];
 	char keyName[256];
 
-	// Create camera-specific registry key (match cam.cpp logic)
-	if (m_cameraIndex == 0) {
-		strcpy_s(keyName, "SpoutCam");
-	} else {
-		sprintf_s(keyName, "SpoutCam%d", m_cameraIndex + 1);
-	}
+	// Create camera-specific registry key using camera name
+	GetCameraRegistryPath(keyName, sizeof(keyName));
 
 	HWND hwndCtl = GetDlgItem(this->m_Dlg, IDC_FPS);
 	dwFps = ComboBox_GetCurSel(hwndCtl);
-	sprintf_s(name, "Software\\Leading Edge\\%s", keyName);
-	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "fps", dwFps);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "fps", dwFps);
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_RESOLUTION);
 	dwResolution = ComboBox_GetCurSel(hwndCtl);
-	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "resolution", dwResolution);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "resolution", dwResolution);
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_NAME);
 	Edit_GetText(hwndCtl, wname, 256);
 	WideCharToMultiByte(CP_ACP, 0, wname, -1, name, 256, NULL, NULL);
-	if (m_cameraIndex == 0) {
-		strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
-	} else {
-		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
-	}
 	WritePathToRegistry(HKEY_CURRENT_USER, keyName, "senderstart", name);
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_MIRROR);
 	dwMirror = Button_GetCheck(hwndCtl);
-	if (m_cameraIndex == 0) {
-		strcpy_s(name, "Software\\Leading Edge\\SpoutCam");
-	} else {
-		sprintf_s(name, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
-	}
-	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "mirror", dwMirror);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "mirror", dwMirror);
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_SWAP);
 	dwSwap = Button_GetCheck(hwndCtl);
-	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "swap", dwSwap);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "swap", dwSwap);
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_FLIP);
 	dwFlip = Button_GetCheck(hwndCtl);
-	WriteDwordToRegistry(HKEY_CURRENT_USER, name, "flip", dwFlip);
+	WriteDwordToRegistry(HKEY_CURRENT_USER, keyName, "flip", dwFlip);
 }
 
 // Load settings for a specific camera tab
@@ -934,12 +1034,8 @@ void CSpoutCamProperties::LoadCameraSettings(int cameraIndex)
 	// Load camera name from dynamic camera registry
 	LoadCameraName();
 
-	// Create camera-specific registry key
-	if (cameraIndex == 0) {
-		strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
-	} else {
-		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
-	}
+	// Create camera-specific registry key using camera name
+	GetCameraRegistryPath(keyName, sizeof(keyName));
 
 	// Load FPS - use sender-based defaults if no saved settings
 	DWORD defaultFps, defaultResolution;
@@ -1004,12 +1100,8 @@ void CSpoutCamProperties::ApplyRealTimeSettings()
 	char name[256];
 	wchar_t wname[256];
 
-	// Create camera-specific registry key for current camera (match cam.cpp logic)
-	if (m_cameraIndex == 0) {
-		strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
-	} else {
-		sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
-	}
+	// Create camera-specific registry key using camera name
+	GetCameraRegistryPath(keyName, sizeof(keyName));
 
 	// Get current control values
 	HWND hwndCtl = GetDlgItem(this->m_Dlg, IDC_MIRROR);
@@ -1065,12 +1157,21 @@ void CSpoutCamProperties::RefreshControlsDisplay()
 // Automatically reregister the current camera after FPS/resolution changes
 void CSpoutCamProperties::AutoReregisterCamera()
 {
+	if (m_cameraName.empty()) {
+		if (!m_bSilent) {
+			MessageBox(m_Dlg, L"Cannot reregister camera: camera name not available.", L"Reregistration Error", MB_OK | MB_ICONERROR);
+		}
+		return;
+	}
+
 	// First unregister the current camera
-	HRESULT hr = RegisterSingleCameraFilter(FALSE, m_cameraIndex);
+	HRESULT hr = UnregisterCameraByName(m_cameraName.c_str());
 	if (FAILED(hr)) {
 		if (!m_bSilent) {
-			wchar_t errorMsg[256];
-			swprintf_s(errorMsg, L"Failed to unregister SpoutCam%d during reregistration.\nYou may need to manually unregister and register the camera.", m_cameraIndex + 1);
+			wchar_t errorMsg[512];
+			wchar_t cameraDisplayName[256];
+			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
+			swprintf_s(errorMsg, L"Failed to unregister %s during reregistration.\nYou may need to manually unregister and register the camera.", cameraDisplayName);
 			MessageBox(m_Dlg, errorMsg, L"Reregistration Warning", MB_OK | MB_ICONWARNING);
 		}
 		return;
@@ -1080,17 +1181,21 @@ void CSpoutCamProperties::AutoReregisterCamera()
 	Sleep(100);
 
 	// Re-register the camera with new settings
-	hr = RegisterSingleCameraFilter(TRUE, m_cameraIndex);
+	hr = RegisterCameraByName(m_cameraName.c_str());
 	if (SUCCEEDED(hr)) {
 		if (!m_bSilent) {
-			wchar_t successMsg[256];
-			swprintf_s(successMsg, L"SpoutCam%d has been successfully reregistered with new settings.\nThe camera is now ready to use with updated resolution/FPS.", m_cameraIndex + 1);
+			wchar_t successMsg[512];
+			wchar_t cameraDisplayName[256];
+			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
+			swprintf_s(successMsg, L"%s has been successfully reregistered with new settings.\nThe camera is now ready to use with updated resolution/FPS.", cameraDisplayName);
 			MessageBox(m_Dlg, successMsg, L"Reregistration Complete", MB_OK | MB_ICONINFORMATION);
 		}
 	} else {
 		if (!m_bSilent) {
-			wchar_t errorMsg[256];
-			swprintf_s(errorMsg, L"Failed to reregister SpoutCam%d.\nPlease manually register the camera using the 'Register This Camera' button.", m_cameraIndex + 1);
+			wchar_t errorMsg[512];
+			wchar_t cameraDisplayName[256];
+			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
+			swprintf_s(errorMsg, L"Failed to reregister %s.\nPlease manually register the camera using the 'Register This Camera' button.", cameraDisplayName);
 			MessageBox(m_Dlg, errorMsg, L"Reregistration Error", MB_OK | MB_ICONERROR);
 		}
 	}
@@ -1147,70 +1252,27 @@ void CSpoutCamProperties::LoadCameraName()
 	HWND hwndCameraNameCtl = GetDlgItem(this->m_Dlg, IDC_CAMERA_NAME_EDIT);
 	if (!hwndCameraNameCtl) return;
 
-	// Try to read the current camera's name from the dynamic registry
-	char exePath[MAX_PATH];
-	GetModuleFileNameA(NULL, exePath, MAX_PATH);
-	char* lastSlash = strrchr(exePath, '\\');
-	if (lastSlash) *lastSlash = '\0';
+	// If we already have the camera name from the factory or OnConnect, use it directly
+	if (!m_cameraName.empty()) {
+		wchar_t wcameraname[256];
+		MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, wcameraname, 256);
+		Edit_SetText(hwndCameraNameCtl, wcameraname);
+		return;
+	}
 
-	// Check registry for selected camera info (replaces camera_info.tmp)
-	DWORD selectedCameraIndex = 0;
-	char currentCameraName[256] = {0};
+	// If no camera name is set, try to get it from the DynamicCameraManager using the camera index
+	auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+	auto allCameras = manager->GetAllCameras();
 	
-	if (ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraIndex", &selectedCameraIndex) &&
-		ReadPathFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraName", currentCameraName)) {
-		
-		// If this matches our camera index, use the name
-		if (selectedCameraIndex == m_cameraIndex && strlen(currentCameraName) > 0) {
+	if (m_cameraIndex >= 0 && m_cameraIndex < (int)allCameras.size()) {
+		auto cameraConfig = allCameras[m_cameraIndex];
+		if (cameraConfig) {
+			m_cameraName = cameraConfig->name;
 			wchar_t wcameraname[256];
-			MultiByteToWideChar(CP_ACP, 0, currentCameraName, -1, wcameraname, 256);
+			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, wcameraname, 256);
 			Edit_SetText(hwndCameraNameCtl, wcameraname);
 			return;
 		}
-	}
-	
-	// Fallback: try to find name in dynamic camera registry based on slot index
-	HKEY camerasKey;
-	LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam\\Cameras", 0, KEY_READ, &camerasKey);
-	if (result == ERROR_SUCCESS) {
-		DWORD subkeyCount = 0;
-		DWORD maxSubkeyLen = 0;
-		result = RegQueryInfoKeyA(camerasKey, nullptr, nullptr, nullptr, &subkeyCount, &maxSubkeyLen, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
-		
-		if (result == ERROR_SUCCESS && maxSubkeyLen > 0) {
-			char* subkeyName = new char[maxSubkeyLen + 1];
-			
-			for (DWORD i = 0; i < subkeyCount; i++) {
-				DWORD subkeyNameLen = maxSubkeyLen + 1;
-				if (RegEnumKeyExA(camerasKey, i, subkeyName, &subkeyNameLen, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-					char cameraPath[512];
-					sprintf_s(cameraPath, "Software\\Leading Edge\\SpoutCam\\Cameras\\%s", subkeyName);
-					
-					HKEY cameraKey;
-					if (RegOpenKeyExA(HKEY_CURRENT_USER, cameraPath, 0, KEY_READ, &cameraKey) == ERROR_SUCCESS) {
-						char slotStr[16];
-						DWORD type = REG_SZ;
-						DWORD size = sizeof(slotStr);
-						if (RegQueryValueExA(cameraKey, "slotIndex", nullptr, &type, (LPBYTE)slotStr, &size) == ERROR_SUCCESS) {
-							int slotIndex = atoi(slotStr);
-							if (slotIndex == m_cameraIndex) {
-								// Found our camera name
-								wchar_t wcameraname[256];
-								MultiByteToWideChar(CP_ACP, 0, subkeyName, -1, wcameraname, 256);
-								Edit_SetText(hwndCameraNameCtl, wcameraname);
-								RegCloseKey(cameraKey);
-								delete[] subkeyName;
-								RegCloseKey(camerasKey);
-								return;
-							}
-						}
-						RegCloseKey(cameraKey);
-					}
-				}
-			}
-			delete[] subkeyName;
-		}
-		RegCloseKey(camerasKey);
 	}
 	
 	// Final fallback: use default name based on camera index
@@ -1221,6 +1283,7 @@ void CSpoutCamProperties::LoadCameraName()
 		sprintf_s(defaultName, "SpoutCam%d", m_cameraIndex + 1);
 	}
 	
+	m_cameraName = defaultName;
 	wchar_t wcameraname[256];
 	MultiByteToWideChar(CP_ACP, 0, defaultName, -1, wcameraname, 256);
 	Edit_SetText(hwndCameraNameCtl, wcameraname);
@@ -1229,105 +1292,84 @@ void CSpoutCamProperties::LoadCameraName()
 // Update camera name in the dynamic camera registry
 void CSpoutCamProperties::UpdateCameraName(const char* newName)
 {
-	if (!newName || strlen(newName) == 0) return;
+	if (!newName || strlen(newName) == 0 || m_cameraName.empty()) return;
 	
-	// Find the existing camera entry in the dynamic registry based on slot index
-	HKEY camerasKey;
-	LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam\\Cameras", 0, KEY_READ, &camerasKey);
-	if (result != ERROR_SUCCESS) return;
+	// Don't do anything if name hasn't changed
+	if (m_cameraName == newName) return;
 	
-	DWORD subkeyCount = 0;
-	DWORD maxSubkeyLen = 0;
-	result = RegQueryInfoKeyA(camerasKey, nullptr, nullptr, nullptr, &subkeyCount, &maxSubkeyLen, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+	auto manager = SpoutCam::DynamicCameraManager::GetInstance();
 	
-	if (result == ERROR_SUCCESS && maxSubkeyLen > 0) {
-		char* subkeyName = new char[maxSubkeyLen + 1];
-		char oldCameraName[256] = {0};
-		
-		for (DWORD i = 0; i < subkeyCount; i++) {
-			DWORD subkeyNameLen = maxSubkeyLen + 1;
-			if (RegEnumKeyExA(camerasKey, i, subkeyName, &subkeyNameLen, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-				char cameraPath[512];
-				sprintf_s(cameraPath, "Software\\Leading Edge\\SpoutCam\\Cameras\\%s", subkeyName);
-				
-				HKEY cameraKey;
-				if (RegOpenKeyExA(HKEY_CURRENT_USER, cameraPath, 0, KEY_READ, &cameraKey) == ERROR_SUCCESS) {
-					char slotStr[16];
-					DWORD type = REG_SZ;
-					DWORD size = sizeof(slotStr);
-					if (RegQueryValueExA(cameraKey, "slotIndex", nullptr, &type, (LPBYTE)slotStr, &size) == ERROR_SUCCESS) {
-						int slotIndex = atoi(slotStr);
-						if (slotIndex == m_cameraIndex) {
-							// Found our camera, check if name needs to change
-							strcpy_s(oldCameraName, subkeyName);
-							RegCloseKey(cameraKey);
-							break;
-						}
-					}
-					RegCloseKey(cameraKey);
-				}
-			}
-		}
-		delete[] subkeyName;
-		
-		// If we found the camera and the name is different, rename the registry key
-		if (strlen(oldCameraName) > 0 && strcmp(oldCameraName, newName) != 0) {
-			// Check if new name already exists
-			char newCameraPath[512];
-			sprintf_s(newCameraPath, "Software\\Leading Edge\\SpoutCam\\Cameras\\%s", newName);
-			
-			HKEY testKey;
-			if (RegOpenKeyExA(HKEY_CURRENT_USER, newCameraPath, 0, KEY_READ, &testKey) == ERROR_SUCCESS) {
-				RegCloseKey(testKey);
-				RegCloseKey(camerasKey);
-				// Name already exists, show error or use old name
-				return;
-			}
-			
-			// Copy the old registry tree to the new location
-			char oldCameraPath[512];
-			sprintf_s(oldCameraPath, "Software\\Leading Edge\\SpoutCam\\Cameras\\%s", oldCameraName);
-			
-			HKEY oldKey, newKey;
-			if (RegOpenKeyExA(HKEY_CURRENT_USER, oldCameraPath, 0, KEY_ALL_ACCESS, &oldKey) == ERROR_SUCCESS) {
-				if (RegCreateKeyExA(HKEY_CURRENT_USER, newCameraPath, 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, nullptr, &newKey, nullptr) == ERROR_SUCCESS) {
-					// Copy values from old key to new key
-					DWORD valueCount = 0;
-					DWORD maxValueNameLen = 0;
-					DWORD maxValueLen = 0;
-					
-					if (RegQueryInfoKeyA(oldKey, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &valueCount, &maxValueNameLen, &maxValueLen, nullptr, nullptr) == ERROR_SUCCESS) {
-						char* valueName = new char[maxValueNameLen + 1];
-						BYTE* valueData = new BYTE[maxValueLen];
-						
-						for (DWORD j = 0; j < valueCount; j++) {
-							DWORD valueNameLen = maxValueNameLen + 1;
-							DWORD valueDataLen = maxValueLen;
-							DWORD valueType;
-							
-							if (RegEnumValueA(oldKey, j, valueName, &valueNameLen, nullptr, &valueType, valueData, &valueDataLen) == ERROR_SUCCESS) {
-								RegSetValueExA(newKey, valueName, 0, valueType, valueData, valueDataLen);
-							}
-						}
-						
-						delete[] valueName;
-						delete[] valueData;
-					}
-					
-					// Update the name field in the new registry location
-					RegSetValueExA(newKey, "name", 0, REG_SZ, (const BYTE*)newName, (DWORD)strlen(newName) + 1);
-					
-					RegCloseKey(newKey);
-					
-					// Delete the old registry key
-					RegCloseKey(oldKey);
-					RegDeleteTreeA(HKEY_CURRENT_USER, oldCameraPath);
-				} else {
-					RegCloseKey(oldKey);
-				}
-			}
-		}
+	// Check if new name already exists
+	auto existingCamera = manager->GetCamera(newName);
+	if (existingCamera) {
+		// Name already exists, show error
+		wchar_t errorMsg[256];
+		wchar_t newNameWide[256];
+		MultiByteToWideChar(CP_ACP, 0, newName, -1, newNameWide, 256);
+		swprintf_s(errorMsg, L"Camera name '%s' already exists. Please choose a different name.", newNameWide);
+		MessageBox(m_Dlg, errorMsg, L"Name Conflict", MB_OK | MB_ICONWARNING);
+		return;
 	}
 	
-	RegCloseKey(camerasKey);
+	// Get the current camera settings from registry BEFORE renaming
+	char oldRegistryPath[512];
+	char newRegistryPath[512];
+	GetCameraRegistryPath(oldRegistryPath, sizeof(oldRegistryPath));
+	sprintf_s(newRegistryPath, sizeof(newRegistryPath), "Software\\Leading Edge\\SpoutCam\\%s", newName);
+	
+	// Migrate all settings from old registry path to new registry path
+	HKEY oldKey, newKey;
+	if (RegOpenKeyExA(HKEY_CURRENT_USER, oldRegistryPath, 0, KEY_READ, &oldKey) == ERROR_SUCCESS) {
+		if (RegCreateKeyExA(HKEY_CURRENT_USER, newRegistryPath, 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, nullptr, &newKey, nullptr) == ERROR_SUCCESS) {
+			// Copy all values from old registry location to new one
+			DWORD valueCount = 0;
+			DWORD maxValueNameLen = 0;
+			DWORD maxValueLen = 0;
+			
+			if (RegQueryInfoKeyA(oldKey, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &valueCount, &maxValueNameLen, &maxValueLen, nullptr, nullptr) == ERROR_SUCCESS) {
+				char* valueName = new char[maxValueNameLen + 1];
+				BYTE* valueData = new BYTE[maxValueLen];
+				
+				for (DWORD i = 0; i < valueCount; i++) {
+					DWORD valueNameLen = maxValueNameLen + 1;
+					DWORD valueDataLen = maxValueLen;
+					DWORD valueType;
+					
+					if (RegEnumValueA(oldKey, i, valueName, &valueNameLen, nullptr, &valueType, valueData, &valueDataLen) == ERROR_SUCCESS) {
+						RegSetValueExA(newKey, valueName, 0, valueType, valueData, valueDataLen);
+					}
+				}
+				
+				delete[] valueName;
+				delete[] valueData;
+			}
+			
+			RegCloseKey(newKey);
+		}
+		RegCloseKey(oldKey);
+		
+		// Delete the old registry path
+		RegDeleteTreeA(HKEY_CURRENT_USER, oldRegistryPath);
+	}
+	
+	// Update the camera name in DynamicCameraManager
+	auto currentCamera = manager->GetCamera(m_cameraName);
+	if (currentCamera) {
+		// Create a new camera with the new name and same settings
+		auto newCamera = manager->CreateCamera(newName);
+		if (newCamera) {
+			// Copy settings from old camera to new camera
+			newCamera->senderName = currentCamera->senderName;
+			newCamera->isRegistered = currentCamera->isRegistered;
+			
+			// Save the new camera to registry
+			manager->SaveCameraToRegistry(*newCamera);
+			
+			// Delete the old camera from manager
+			manager->DeleteCamera(m_cameraName);
+			
+			// Update our current camera name
+			m_cameraName = newName;
+		}
+	}
 }

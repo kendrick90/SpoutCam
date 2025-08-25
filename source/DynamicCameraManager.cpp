@@ -87,6 +87,7 @@ DynamicCameraConfig* DynamicCameraManager::CreateCamera(const std::string& camer
     // Add to maps
     m_cameras[cameraName] = config;
     m_clsidToName[GuidToString(config.clsid)] = cameraName;
+    m_propPageClsidToName[GuidToString(config.propPageClsid)] = cameraName;
     
     // Save to registry
     SaveCameraToRegistry(config);
@@ -111,12 +112,29 @@ DynamicCameraConfig* DynamicCameraManager::GetCameraByCLSID(const GUID& clsid) {
     return nullptr;
 }
 
+DynamicCameraConfig* DynamicCameraManager::GetCameraByPropPageCLSID(const GUID& propPageClsid) {
+    std::string clsidStr = GuidToString(propPageClsid);
+    auto it = m_propPageClsidToName.find(clsidStr);
+    if (it != m_propPageClsidToName.end()) {
+        return GetCamera(it->second);
+    }
+    return nullptr;
+}
+
 bool DynamicCameraManager::DeleteCamera(const std::string& cameraName) {
     auto it = m_cameras.find(cameraName);
     if (it != m_cameras.end()) {
+        // Remove from manager maps first
         m_clsidToName.erase(GuidToString(it->second.clsid));
+        m_propPageClsidToName.erase(GuidToString(it->second.propPageClsid));
         m_cameras.erase(it);
+        
+        // Delete registry configuration
         DeleteCameraFromRegistry(cameraName);
+        
+        // Note: CLSID unregistration is handled by UnregisterCameraByName() in SpoutCamSettings
+        // which calls the DLL's UnregisterCameraByName function before calling DeleteCamera
+        
         return true;
     }
     return false;
@@ -212,6 +230,7 @@ bool DynamicCameraManager::LoadCamerasFromRegistry() {
             
             m_cameras[config.name] = config;
             m_clsidToName[GuidToString(config.clsid)] = config.name;
+            m_propPageClsidToName[GuidToString(config.propPageClsid)] = config.name;
             
             RegCloseKey(hCameraKey);
         }

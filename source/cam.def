@@ -7,3 +7,5 @@ EXPORTS
 			Configure               PRIVATE
 			RegisterSingleSpoutCamera
 			UnregisterSingleSpoutCamera
+			RegisterCameraByName
+			UnregisterCameraByName
