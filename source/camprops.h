@@ -2,7 +2,7 @@
 #include <string>
 #include "DynamicCameraManager.h"
 
-// Forward declarations for camera registration functions
+// Forward declarations for camera activation functions
 HRESULT RegisterSingleCameraFilter(BOOL bRegister, int cameraIndex);
 STDAPI RegisterCameraByName(const char* cameraName);
 STDAPI UnregisterCameraByName(const char* cameraName);
@@ -44,13 +44,13 @@ private:
 	void UpdateCameraName(const char* newName);
 	void LoadCameraName();
 	
-	// Camera registration methods
-	void RegisterCameras();
-	void UnregisterCameras();
-	void RegisterSingleCamera(int cameraIndex);
-	void UnregisterSingleCamera(int cameraIndex);
-	void RegisterCurrentCamera();
-	void UnregisterCurrentCamera();
+	// Camera activation methods
+	void ActivateCameras();
+	void DeactivateCameras();
+	void ActivateSingleCamera(int cameraIndex);
+	void DeactivateSingleCamera(int cameraIndex);
+	void ActivateCurrentCamera();
+	void DeactivateCurrentCamera();
 	
 	// Properties initialization and legacy tab compatibility functions
 	void InitializeProps();
@@ -62,7 +62,7 @@ private:
 	void LoadCameraSettings(int cameraIndex);
 	void ApplyRealTimeSettings();
 	void RefreshControlsDisplay();
-	void AutoReregisterCamera();
+	void AutoReactivateCamera();
 	void GetActiveSenderDefaults(DWORD* pDefaultFps, DWORD* pDefaultResolution);
 };
 

@@ -508,7 +508,7 @@ HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
             // Register all cameras and their property pages
             printf("RegisterSingleCameraFilter: Falling back to registering all cameras\n");
             for (size_t i = 0; i < g_DynamicCameraConfigs.size() && SUCCEEDED(hr); i++) {
-                printf("RegisterSingleCameraFilter: Registering camera %d: '%s'\n", 
+                printf("RegisterSingleCameraFilter: Registering camera %d: '%ls'\n", 
                     (int)i, CameraNames[i].c_str());
                 hr = AMovieSetupRegisterServer(g_DynamicCameraConfigs[i].clsid, CameraNames[i].c_str(), achFileName, L"Both", L"InprocServer32");
                 if (SUCCEEDED(hr)) {
@@ -621,7 +621,6 @@ extern "C" __declspec(dllexport) BOOL STDAPICALLTYPE GetSpoutCameraName(int came
         return FALSE;
     }
     
-    char customName[256];
     const char* nameToUse;
     
     // Use dynamic camera name
@@ -832,7 +831,7 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCameraFromFil
 					auto cameraConfig = manager->GetCamera(cameraName);
 					
 					if (cameraConfig) {
-						printf("ConfigureSpoutCameraFromFile: Using property page CLSID for camera '%s'\n", cameraName);
+						printf("ConfigureSpoutCameraFromFile: Using property page CLSID for camera '%s'\n", cameraName.c_str());
 						hr = OleCreatePropertyFrame(
 							GetDesktopWindow(),						// Parent window
 							0, 0,									// Reserved
@@ -851,7 +850,7 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCameraFromFil
 							printf("ConfigureSpoutCameraFromFile: OleCreatePropertyFrame also failed with HRESULT 0x%08X\n", hr);
 						}
 					} else {
-						printf("ConfigureSpoutCameraFromFile: Could not find camera configuration for '%s'\n", cameraName);
+						printf("ConfigureSpoutCameraFromFile: Could not find camera configuration for '%s'\n", cameraName.c_str());
 					}
 				}
 					

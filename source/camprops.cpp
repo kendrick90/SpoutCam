@@ -210,37 +210,37 @@ INT_PTR CSpoutCamProperties::OnReceiveMessage(HWND hwnd, UINT uMsg, WPARAM wPara
 					break;
 
 				case IDC_REGISTER:
-					// Register this specific camera
+					// Activate this specific camera
 					{
 						int cameraIndex = 0;
 						GetCameraIndex(&cameraIndex);
-						RegisterSingleCamera(cameraIndex);
+						ActivateSingleCamera(cameraIndex);
 					}
 					break;
 
 				case IDC_UNREGISTER:
-					// Unregister this specific camera
+					// Deactivate this specific camera
 					{
 						int cameraIndex = 0;
 						GetCameraIndex(&cameraIndex);
-						UnregisterSingleCamera(cameraIndex);
+						DeactivateSingleCamera(cameraIndex);
 					}
 					break;
 
 				case IDC_REREGISTER:
-					// Reregister this specific camera (unregister then register)
+					// Reactivate this specific camera (deactivate then activate)
 					{
 						int cameraIndex = 0;
 						GetCameraIndex(&cameraIndex);
 						
-						// First unregister
-						UnregisterSingleCamera(cameraIndex);
+						// First deactivate
+						DeactivateSingleCamera(cameraIndex);
 						
-						// Brief pause to ensure unregistration is complete
+						// Brief pause to ensure deactivation is complete
 						Sleep(500);
 						
-						// Then register again
-						RegisterSingleCamera(cameraIndex);
+						// Then activate again
+						ActivateSingleCamera(cameraIndex);
 					}
 					break;
 
@@ -612,7 +612,7 @@ HRESULT CSpoutCamProperties::OnApplyChanges()
 
 	// Perform automatic reregistration if needed for FPS/resolution changes
 	if (needsReregistration) {
-		AutoReregisterCamera();
+		AutoReactivateCamera();
 	}
 
 	return S_OK;
@@ -788,7 +788,7 @@ void CSpoutCamProperties::RefreshSenderList()
 extern "C" STDAPI RegisterFilters(BOOL bRegister);
 
 // Register all SpoutCam cameras
-void CSpoutCamProperties::RegisterCameras()
+void CSpoutCamProperties::ActivateCameras()
 {
 	HRESULT hr = RegisterFilters(TRUE);
 	if (SUCCEEDED(hr)) {
@@ -801,7 +801,7 @@ void CSpoutCamProperties::RegisterCameras()
 }
 
 // Unregister all SpoutCam cameras - simplified without UAC elevation for now
-void CSpoutCamProperties::UnregisterCameras()
+void CSpoutCamProperties::DeactivateCameras()
 {
 	HRESULT hr = RegisterFilters(FALSE);
 	if (SUCCEEDED(hr)) {
@@ -814,7 +814,7 @@ void CSpoutCamProperties::UnregisterCameras()
 }
 
 // Register single camera using camera name (no index needed)
-void CSpoutCamProperties::RegisterSingleCamera(int cameraIndex)
+void CSpoutCamProperties::ActivateSingleCamera(int cameraIndex)
 {
 	// Use the current camera name instead of index
 	HRESULT hr = RegisterCameraByName(m_cameraName.c_str());
@@ -836,7 +836,7 @@ void CSpoutCamProperties::RegisterSingleCamera(int cameraIndex)
 }
 
 // Unregister single camera using camera name (no index needed)
-void CSpoutCamProperties::UnregisterSingleCamera(int cameraIndex)
+void CSpoutCamProperties::DeactivateSingleCamera(int cameraIndex)
 {
 	// Use the current camera name instead of index  
 	HRESULT hr = UnregisterCameraByName(m_cameraName.c_str());
@@ -858,7 +858,7 @@ void CSpoutCamProperties::UnregisterSingleCamera(int cameraIndex)
 }
 
 // Register current camera using camera name
-void CSpoutCamProperties::RegisterCurrentCamera()
+void CSpoutCamProperties::ActivateCurrentCamera()
 {
 	if (m_cameraName.empty()) {
 		MessageBox(m_Dlg, L"Cannot register camera: camera name not available.", L"Registration Error", MB_OK | MB_ICONERROR);
@@ -884,10 +884,10 @@ void CSpoutCamProperties::RegisterCurrentCamera()
 }
 
 // Unregister current camera using camera name
-void CSpoutCamProperties::UnregisterCurrentCamera()
+void CSpoutCamProperties::DeactivateCurrentCamera()
 {
 	if (m_cameraName.empty()) {
-		MessageBox(m_Dlg, L"Cannot unregister camera: camera name not available.", L"Unregistration Error", MB_OK | MB_ICONERROR);
+		MessageBox(m_Dlg, L"Cannot deactivate camera: camera name not available.", L"Deactivation Error", MB_OK | MB_ICONERROR);
 		return;
 	}
 
@@ -897,14 +897,14 @@ void CSpoutCamProperties::UnregisterCurrentCamera()
 			wchar_t message[512];
 			wchar_t cameraDisplayName[256];
 			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
-			swprintf_s(message, L"%s unregistered successfully!", cameraDisplayName);
-			MessageBox(m_Dlg, message, L"Unregistration", MB_OK | MB_ICONINFORMATION);
+			swprintf_s(message, L"%s deactivated successfully!", cameraDisplayName);
+			MessageBox(m_Dlg, message, L"Deactivation", MB_OK | MB_ICONINFORMATION);
 		}
 	} else {
 		wchar_t message[512];
 		wchar_t cameraDisplayName[256];
 		MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
-		swprintf_s(message, L"Failed to unregister %s.\n\nThis may require administrator privileges.", cameraDisplayName);
+		swprintf_s(message, L"Failed to deactivate %s.\n\nThis may require administrator privileges.", cameraDisplayName);
 		MessageBox(m_Dlg, message, L"Unregistration Error", MB_OK | MB_ICONERROR);
 	}
 }
@@ -1112,49 +1112,49 @@ void CSpoutCamProperties::RefreshControlsDisplay()
 	UpdateWindow(this->m_Dlg);
 }
 
-// Automatically reregister the current camera after FPS/resolution changes
-void CSpoutCamProperties::AutoReregisterCamera()
+// Automatically reactivate the current camera after FPS/resolution changes
+void CSpoutCamProperties::AutoReactivateCamera()
 {
 	if (m_cameraName.empty()) {
 		if (!m_bSilent) {
-			MessageBox(m_Dlg, L"Cannot reregister camera: camera name not available.", L"Reregistration Error", MB_OK | MB_ICONERROR);
+			MessageBox(m_Dlg, L"Cannot reactivate camera: camera name not available.", L"Reactivation Error", MB_OK | MB_ICONERROR);
 		}
 		return;
 	}
 
-	// First unregister the current camera
+	// First deactivate the current camera
 	HRESULT hr = UnregisterCameraByName(m_cameraName.c_str());
 	if (FAILED(hr)) {
 		if (!m_bSilent) {
 			wchar_t errorMsg[512];
 			wchar_t cameraDisplayName[256];
 			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
-			swprintf_s(errorMsg, L"Failed to unregister %s during reregistration.\nYou may need to manually unregister and register the camera.", cameraDisplayName);
-			MessageBox(m_Dlg, errorMsg, L"Reregistration Warning", MB_OK | MB_ICONWARNING);
+			swprintf_s(errorMsg, L"Failed to deactivate %s during reactivation.\nYou may need to manually deactivate and activate the camera.", cameraDisplayName);
+			MessageBox(m_Dlg, errorMsg, L"Reactivation Warning", MB_OK | MB_ICONWARNING);
 		}
 		return;
 	}
 
-	// Small delay to ensure clean unregistration
+	// Small delay to ensure clean deactivation
 	Sleep(100);
 
-	// Re-register the camera with new settings
+	// Re-activate the camera with new settings
 	hr = RegisterCameraByName(m_cameraName.c_str());
 	if (SUCCEEDED(hr)) {
 		if (!m_bSilent) {
 			wchar_t successMsg[512];
 			wchar_t cameraDisplayName[256];
 			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
-			swprintf_s(successMsg, L"%s has been successfully reregistered with new settings.\nThe camera is now ready to use with updated resolution/FPS.", cameraDisplayName);
-			MessageBox(m_Dlg, successMsg, L"Reregistration Complete", MB_OK | MB_ICONINFORMATION);
+			swprintf_s(successMsg, L"%s has been successfully reactivated with new settings.\nThe camera is now ready to use with updated resolution/FPS.", cameraDisplayName);
+			MessageBox(m_Dlg, successMsg, L"Reactivation Complete", MB_OK | MB_ICONINFORMATION);
 		}
 	} else {
 		if (!m_bSilent) {
 			wchar_t errorMsg[512];
 			wchar_t cameraDisplayName[256];
 			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, cameraDisplayName, 256);
-			swprintf_s(errorMsg, L"Failed to reregister %s.\nPlease manually register the camera using the 'Register This Camera' button.", cameraDisplayName);
-			MessageBox(m_Dlg, errorMsg, L"Reregistration Error", MB_OK | MB_ICONERROR);
+			swprintf_s(errorMsg, L"Failed to reactivate %s.\nPlease manually activate the camera using the 'Activate This Camera' button.", cameraDisplayName);
+			MessageBox(m_Dlg, errorMsg, L"Reactivation Error", MB_OK | MB_ICONERROR);
 		}
 	}
 }

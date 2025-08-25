@@ -30,8 +30,8 @@ void LogWithTimestamp(const char* format, ...) {
 
 #define LOG(...) LogWithTimestamp(__VA_ARGS__)
 
-// Cache for registered filters for performance
-std::vector<std::string> g_registeredFilters;
+// Cache for active filters for performance
+std::vector<std::string> g_activeFilters;
 bool g_filtersScanned = false;
 
 // Dynamic camera management - now uses DynamicCameraManager
@@ -58,14 +58,14 @@ bool UnregisterLegacyCamera(int cameraIndex);
 void OpenLegacyCameraProperties(int cameraIndex);
 bool IsRunningAsAdmin();
 bool RestartAsAdmin();
-void ScanRegisteredFilters();
+void ScanActiveFilters();
 bool ReadStringFromRegistry(HKEY hKey, const char* subkey, const char* valuename, char* buffer, DWORD bufferSize);
 bool ReadDwordFromRegistry(HKEY hKey, const char* subkey, const char* valuename, DWORD* value);
 bool WriteStringToRegistry(HKEY hKey, const char* subkey, const char* valuename, const char* value);
 bool WriteBinaryToRegistry(HKEY hKey, const char* subkey, const char* valuename, const BYTE* data, DWORD dataSize);
 void DeleteCameraConfiguration(const char* cameraName);
 void DeleteLegacyCameraConfiguration(int cameraIndex);
-bool IsCameraRegistered(int cameraIndex);
+bool IsCameraActive(int cameraIndex);
 bool HasCameraSettings(int cameraIndex);
 std::string GenerateDefaultCameraName();
 
@@ -88,14 +88,14 @@ typedef BOOL (STDAPICALLTYPE *GetSpoutCameraNameFunc)(int cameraIndex, char* nam
 HINSTANCE g_hInst;
 
 
-// Optimized function to scan registered DirectShow video capture filters
-void ScanRegisteredFilters()
+// Optimized function to scan active DirectShow video capture filters
+void ScanActiveFilters()
 {
     if (g_filtersScanned) {
         return; // Use cached results
     }
     
-    g_registeredFilters.clear();
+    g_activeFilters.clear();
     
     // Direct registry access to CLSID_VideoInputDeviceCategory
     const char* directShowPath = "SOFTWARE\\Classes\\CLSID\\{860BB310-5D01-11d0-BD3B-00A0C911CE86}\\Instance";
@@ -119,7 +119,7 @@ void ScanRegisteredFilters()
                         if (ReadStringFromRegistry(HKEY_LOCAL_MACHINE, 
                                                  (std::string(directShowPath) + "\\" + subkeyName).c_str(), 
                                                  "FriendlyName", friendlyName, sizeof(friendlyName))) {
-                            g_registeredFilters.push_back(std::string(friendlyName));
+                            g_activeFilters.push_back(std::string(friendlyName));
                         }
                         RegCloseKey(filterKey);
                     }
@@ -345,7 +345,7 @@ bool RemoveCameraByName(const std::string& cameraName)
     }
 }
 
-bool IsCameraRegistered(int cameraIndex)
+bool IsCameraActive(int cameraIndex)
 {
     // Get the actual name that the DLL will use for this camera
     char actualCameraName[256];
@@ -374,7 +374,7 @@ bool IsCameraRegistered(int cameraIndex)
         
         if (getNameFunc && getNameFunc(cameraIndex, actualCameraName, sizeof(actualCameraName))) {
             // Use the actual name returned by the DLL
-            for (const auto& filter : g_registeredFilters) {
+            for (const auto& filter : g_activeFilters) {
                 if (filter.find(actualCameraName) != std::string::npos) {
                     FreeLibrary(hDll);
                     return true;
@@ -392,7 +392,7 @@ bool IsCameraRegistered(int cameraIndex)
         sprintf_s(searchName, "SpoutCam%d", cameraIndex + 1);  // SpoutCam2, SpoutCam3, etc.
     }
     
-    for (const auto& filter : g_registeredFilters) {
+    for (const auto& filter : g_activeFilters) {
         if (filter.find(searchName) != std::string::npos) {
             return true;
         }
@@ -436,7 +436,7 @@ void RefreshCameraList(HWND hListView)
     // Force cleanup and reload of the manager instance to ensure fresh data from registry
     SpoutCam::DynamicCameraManager::Cleanup();
     
-    ScanRegisteredFilters();
+    ScanActiveFilters();
     ScanDynamicCameras();
     PopulateCameraList(hListView);
 }
@@ -449,7 +449,7 @@ void AutoRefreshCameraList(HWND hListView)
     static std::vector<std::pair<std::string, bool>> lastCameraStates;
     
     // Rescan data (but reuse cache where possible)
-    ScanRegisteredFilters();
+    ScanActiveFilters();
     ScanDynamicCameras();
     
     // Get current cameras from dynamic manager
@@ -509,8 +509,8 @@ void PopulateCameraList(HWND hListView)
     // Prevent UI notifications during update to avoid focus stealing
     SendMessage(hListView, WM_SETREDRAW, FALSE, 0);
     
-    // Scan for registered filters and dynamic cameras
-    ScanRegisteredFilters();
+    // Scan for active filters and dynamic cameras
+    ScanActiveFilters();
     ScanDynamicCameras();
     
     // Clear existing items
