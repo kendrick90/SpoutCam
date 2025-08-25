@@ -642,42 +642,21 @@ void CSpoutCamProperties::InitializeCameraName()
 	if (hwndName) {
 		WCHAR cameraName[256];
 		
-		// Try to read custom camera name from info file
+		// Try to read custom camera name from registry
 		bool foundCustomName = false;
-		char exePath[MAX_PATH];
-		GetModuleFileNameA(NULL, exePath, MAX_PATH);
-		char* lastSlash = strrchr(exePath, '\\');
-		if (lastSlash) *lastSlash = '\0';
 		
-		char tempFilePath[MAX_PATH];
-		sprintf_s(tempFilePath, "%s\\camera_info.tmp", exePath);
+		// Check if there's a selected camera index and name in registry
+		DWORD selectedCameraIndex = 0;
+		char customName[256] = "";
 		
-		FILE* infoFile = nullptr;
-		if (fopen_s(&infoFile, tempFilePath, "r") == 0 && infoFile) {
-			char line[512];
-			int fileIndex = -1;
-			char customName[256] = "";
+		if (ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraIndex", &selectedCameraIndex) &&
+			selectedCameraIndex == m_cameraIndex &&
+			ReadPathFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraName", customName)) {
 			
-			while (fgets(line, sizeof(line), infoFile)) {
-				// Remove newline
-				line[strcspn(line, "\r\n")] = 0;
-				
-				if (strncmp(line, "cameraIndex=", 12) == 0) {
-					fileIndex = atoi(line + 12);
-				} else if (strncmp(line, "cameraName=", 11) == 0) {
-					strcpy_s(customName, line + 11);
-				}
-			}
-			fclose(infoFile);
-			
-			// If this file matches our camera index, use the custom name
-			if (fileIndex == m_cameraIndex && strlen(customName) > 0) {
+			if (strlen(customName) > 0) {
 				MultiByteToWideChar(CP_ACP, 0, customName, -1, cameraName, 256);
 				foundCustomName = true;
 			}
-			
-			// Clean up the temporary file after reading
-			DeleteFileA(tempFilePath);
 		}
 		
 		// Fallback to default naming if no custom name found
@@ -1174,29 +1153,15 @@ void CSpoutCamProperties::LoadCameraName()
 	char* lastSlash = strrchr(exePath, '\\');
 	if (lastSlash) *lastSlash = '\0';
 
-	// Check if camera_info.tmp exists (created by SpoutCamSettings)
-	char infoFilePath[MAX_PATH];
-	sprintf_s(infoFilePath, "%s\\camera_info.tmp", exePath);
-	
-	FILE* infoFile = nullptr;
+	// Check registry for selected camera info (replaces camera_info.tmp)
+	DWORD selectedCameraIndex = 0;
 	char currentCameraName[256] = {0};
 	
-	if (fopen_s(&infoFile, infoFilePath, "r") == 0 && infoFile) {
-		char line[512];
-		int fileIndex = -1;
-		
-		while (fgets(line, sizeof(line), infoFile)) {
-			if (sscanf_s(line, "cameraIndex=%d", &fileIndex) == 1) {
-				// Found camera index
-			}
-			if (sscanf_s(line, "cameraName=%255s", currentCameraName, (unsigned)sizeof(currentCameraName)) == 1) {
-				// Found camera name
-			}
-		}
-		fclose(infoFile);
+	if (ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraIndex", &selectedCameraIndex) &&
+		ReadPathFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraName", currentCameraName)) {
 		
 		// If this matches our camera index, use the name
-		if (fileIndex == m_cameraIndex && strlen(currentCameraName) > 0) {
+		if (selectedCameraIndex == m_cameraIndex && strlen(currentCameraName) > 0) {
 			wchar_t wcameraname[256];
 			MultiByteToWideChar(CP_ACP, 0, currentCameraName, -1, wcameraname, 256);
 			Edit_SetText(hwndCameraNameCtl, wcameraname);

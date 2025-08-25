@@ -914,17 +914,19 @@ void OpenCameraProperties(const DynamicCamera& camera)
     
     swprintf_s(cmdPath, MAX_PATH, L"%s\\%s\\SpoutCamProperties.cmd", exePath, subDir);
     
-    // Create the standard camera index file that SpoutCamProperties.cmd expects
-    char tempFilePath[MAX_PATH];
-    sprintf_s(tempFilePath, "%S\\camera_index.tmp", exePath);
+    // Store the camera index and name in registry for the properties dialog to use
+    HKEY hKey;
+    LONG result = RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", 0, NULL, 
+                                  REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, NULL);
     
-    FILE* tempFile = nullptr;
-    if (fopen_s(&tempFile, tempFilePath, "w") == 0 && tempFile) {
-        fprintf(tempFile, "Camera index: %d", camera.slotIndex);
-        fclose(tempFile);
-        LOG("Created camera index file with index %d for camera '%s'\n", camera.slotIndex, camera.name.c_str());
+    if (result == ERROR_SUCCESS) {
+        DWORD dwIndex = (DWORD)camera.slotIndex;
+        RegSetValueExA(hKey, "SelectedCameraIndex", 0, REG_DWORD, (BYTE*)&dwIndex, sizeof(DWORD));
+        RegSetValueExA(hKey, "SelectedCameraName", 0, REG_SZ, (BYTE*)camera.name.c_str(), (DWORD)camera.name.length() + 1);
+        RegCloseKey(hKey);
+        LOG("Stored camera index %d and name '%s' in registry\n", camera.slotIndex, camera.name.c_str());
     } else {
-        LOG("Failed to create camera index file, falling back to legacy method\n");
+        LOG("Failed to store camera info in registry, falling back to legacy method\n");
         // Fallback to legacy method
         OpenLegacyCameraProperties(camera.slotIndex);
         return;

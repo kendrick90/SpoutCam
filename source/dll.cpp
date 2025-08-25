@@ -600,25 +600,13 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCameraFromFil
 	
 	printf("=== ConfigureSpoutCameraFromFile Debug Session ===\n");
 	
-	// Read camera index from temporary file
-	FILE* indexFile = nullptr;
-	if (fopen_s(&indexFile, "camera_index.tmp", "r") == 0 && indexFile) {
-		char buffer[256];
-		if (fgets(buffer, sizeof(buffer), indexFile)) {
-			printf("Read from file: '%s'\n", buffer);
-			// Parse "Camera index: N" format
-			if (sscanf_s(buffer, "Camera index: %d", &cameraIndex) == 1) {
-				printf("Parsed camera index: %d\n", cameraIndex);
-			} else {
-				printf("Failed to parse camera index from: '%s'\n", buffer);
-				cameraIndex = 0;
-			}
-		}
-		fclose(indexFile);
-		// Clean up temp file
-		DeleteFileA("camera_index.tmp");
+	// Read camera index from registry
+	DWORD dwCameraIndex = 0;
+	if (ReadDwordFromRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "SelectedCameraIndex", &dwCameraIndex)) {
+		cameraIndex = (int)dwCameraIndex;
+		printf("Read camera index from registry: %d\n", cameraIndex);
 	} else {
-		printf("Could not read camera_index.tmp, using default camera 0\n");
+		printf("Could not read camera index from registry, using default camera 0\n");
 		cameraIndex = 0;
 	}
 	
