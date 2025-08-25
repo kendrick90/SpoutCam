@@ -69,7 +69,10 @@ GUID DynamicCameraManager::GeneratePropPageClsid(const std::string& cameraName) 
 }
 
 DynamicCameraConfig* DynamicCameraManager::CreateCamera(const std::string& cameraName) {
-    if (cameraName.empty()) return nullptr;
+    if (cameraName.empty()) {
+        // Never allow empty camera names
+        return nullptr;
+    }
     
     // Check if camera already exists
     auto it = m_cameras.find(cameraName);
@@ -240,12 +243,17 @@ bool DynamicCameraManager::LoadCamerasFromRegistry() {
     
     RegCloseKey(hKey);
     
-    // Create default cameras if none exist
-    if (m_cameras.empty()) {
-        CreateCamera("SpoutCam");
-        CreateCamera("SpoutCam2");
-        CreateCamera("SpoutCam3");
+    // Clean up any cameras with empty names that may have been loaded
+    auto it = m_cameras.find("");
+    if (it != m_cameras.end()) {
+        m_clsidToName.erase(GuidToString(it->second.clsid));
+        m_propPageClsidToName.erase(GuidToString(it->second.propPageClsid));
+        m_cameras.erase(it);
+        DeleteCameraFromRegistry("");  // Clean up from registry too
     }
+    
+    // Don't auto-create default cameras here
+    // They are only created when registry doesn't exist (handled above)
     
     return true;
 }
@@ -283,6 +291,44 @@ bool DynamicCameraManager::SaveCameraToRegistry(const DynamicCameraConfig& camer
 }
 
 bool DynamicCameraManager::DeleteCameraFromRegistry(const std::string& cameraName) {
+    // Handle corrupted cameras with empty names by enumerating and finding them
+    if (cameraName.empty()) {
+        // For empty camera names, we need to enumerate all keys and find/delete empty ones
+        HKEY hKey;
+        LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, 
+            "Software\\Leading Edge\\SpoutCam\\DynamicCameras", 0, KEY_ENUMERATE_SUB_KEYS | KEY_WRITE, &hKey);
+        
+        if (result != ERROR_SUCCESS) {
+            return false;  // Registry key doesn't exist
+        }
+        
+        // Look for empty subkey names (corrupted entries)
+        DWORD index = 0;
+        char subkeyName[256];
+        DWORD subkeyNameSize = sizeof(subkeyName);
+        bool foundEmptyKey = false;
+        
+        while (RegEnumKeyExA(hKey, index, subkeyName, &subkeyNameSize, 
+               nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
+            
+            if (strlen(subkeyName) == 0) {
+                // Found an empty key name - delete it
+                LONG deleteResult = RegDeleteKeyA(hKey, subkeyName);
+                if (deleteResult == ERROR_SUCCESS) {
+                    foundEmptyKey = true;
+                }
+                break;
+            }
+            
+            index++;
+            subkeyNameSize = sizeof(subkeyName);
+        }
+        
+        RegCloseKey(hKey);
+        return foundEmptyKey;
+    }
+    
+    // Normal case: delete specific camera registry key
     std::string keyPath = "Software\\Leading Edge\\SpoutCam\\DynamicCameras\\";
     keyPath += cameraName;
     

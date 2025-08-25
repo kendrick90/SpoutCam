@@ -333,6 +333,11 @@ bool RemoveCameraByName(const std::string& cameraName)
         LOG("Removed camera '%s'\n", cameraName.c_str());
         // Clear cache to refresh
         g_camerasScanned = false;
+        
+        // Force cleanup and reload of the manager instance to ensure persistent removal
+        SpoutCam::DynamicCameraManager::Cleanup();
+        // The next call to GetInstance() will create a new instance and reload from registry
+        
         return true;
     } else {
         LOG("Failed to remove camera '%s'\n", cameraName.c_str());
@@ -427,6 +432,10 @@ void RefreshCameraList(HWND hListView)
 {
     g_filtersScanned = false; // Force rescan
     g_camerasScanned = false; // Force rescan of cameras
+    
+    // Force cleanup and reload of the manager instance to ensure fresh data from registry
+    SpoutCam::DynamicCameraManager::Cleanup();
+    
     ScanRegisteredFilters();
     ScanDynamicCameras();
     PopulateCameraList(hListView);
@@ -1076,7 +1085,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                             auto cameras = manager->GetAllCameras();
                             
                             if (selected != -1 && selected < (int)cameras.size()) {
-                                const std::string& cameraName = cameras[selected]->name;
+                                const std::string cameraName = cameras[selected]->name; // Copy name
                                 if (RegisterCameraByName(cameraName)) {
                                     RefreshCameraList(hListView);
                                     LOG("Camera '%s' registered successfully\n", cameraName.c_str());
@@ -1096,7 +1105,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                             auto cameras = manager->GetAllCameras();
                             
                             if (selected != -1 && selected < (int)cameras.size()) {
-                                const std::string& cameraName = cameras[selected]->name;
+                                const std::string cameraName = cameras[selected]->name; // Copy name
                                 if (UnregisterCameraByName(cameraName)) {
                                     RefreshCameraList(hListView);
                                     LOG("Camera '%s' unregistered successfully\n", cameraName.c_str());
@@ -1116,7 +1125,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                             auto cameras = manager->GetAllCameras();
                             
                             if (selected != -1 && selected < (int)cameras.size()) {
-                                const std::string& cameraName = cameras[selected]->name;
+                                const std::string cameraName = cameras[selected]->name; // Copy name
                                 
                                 LOG("Reregistering camera '%s'\n", cameraName.c_str());
                                 
@@ -1161,7 +1170,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                             auto cameras = manager->GetAllCameras();
                             
                             if (selected != -1 && selected < (int)cameras.size()) {
-                                const std::string& cameraName = cameras[selected]->name;
+                                const std::string cameraName = cameras[selected]->name; // Copy name
                                 
                                 // Validate camera name to prevent crashes
                                 if (cameraName.empty()) {
@@ -1273,7 +1282,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                             auto cameras = manager->GetAllCameras();
                             
                             if (selected != -1 && selected < (int)cameras.size()) {
-                                const std::string& cameraName = cameras[selected]->name;
+                                const std::string cameraName = cameras[selected]->name; // Copy name
                                 OpenCameraPropertiesByName(cameraName);
                             } else if (selected == -1) {
                                 MessageBox(hDlg, "Please select a camera to configure.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);

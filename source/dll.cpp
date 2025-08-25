@@ -408,7 +408,7 @@ HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
         if (cameraIndex >= 0 && cameraIndex < (int)g_DynamicCameraConfigs.size()) {
             // Register single camera and its property page
             printf("RegisterSingleCameraFilter: Registering single camera at index %d\n", cameraIndex);
-            printf("RegisterSingleCameraFilter: Camera name: '%s'\n", CameraNames[cameraIndex].c_str());
+            printf("RegisterSingleCameraFilter: Camera name: '%ls'\n", CameraNames[cameraIndex].c_str());
             printf("RegisterSingleCameraFilter: Camera CLSID: {%08X-%04X-%04X-...}\n", 
                 g_DynamicCameraConfigs[cameraIndex].clsid.Data1, 
                 g_DynamicCameraConfigs[cameraIndex].clsid.Data2, 
