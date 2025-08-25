@@ -355,12 +355,12 @@ CUnknown * WINAPI CVCam::CreateInstance(LPUNKNOWN lpunk, HRESULT *phr)
     auto manager = SpoutCam::DynamicCameraManager::GetInstance();
     manager->LoadCamerasFromRegistry(); // Ensure cameras are loaded
     
-    // Create or get the default "SpoutCam" camera
-    auto defaultCamera = manager->GetCamera("SpoutCam");
+    // Create or get the default "SpoutCam1" camera
+    auto defaultCamera = manager->GetCamera("SpoutCam1");
     if (!defaultCamera) {
-        defaultCamera = manager->CreateCamera("SpoutCam");
+        defaultCamera = manager->CreateCamera("SpoutCam1");
         if (defaultCamera) {
-            manager->SetCameraActive("SpoutCam", true);
+            manager->SetCameraActive("SpoutCam1", true);
         }
     }
     
@@ -423,15 +423,15 @@ SpoutCam::DynamicCameraConfig* CVCam::FindCameraConfig(REFCLSID clsid) {
 CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr) : 
 	CSource(NAME(SPOUTCAMNAME), lpunk, CLSID_SpoutCam) //VS: replaced SpoutCamName with makro SPOUTCAMNAME, NAME() expects LPCTSTR
 {
-    // Default constructor - get default SpoutCam camera (avoid expensive GetAllCameras)
+    // Default constructor - get default SpoutCam1 camera (avoid expensive GetAllCameras)
     auto manager = SpoutCam::DynamicCameraManager::GetInstance();
-    m_cameraConfig = manager->GetCamera("SpoutCam");
+    m_cameraConfig = manager->GetCamera("SpoutCam1");
     if (m_cameraConfig) {
         m_cameraName = m_cameraConfig->name;
     } else {
         // Create default if none exist
-        m_cameraConfig = manager->CreateCamera("SpoutCam");
-        m_cameraName = "SpoutCam";
+        m_cameraConfig = manager->CreateCamera("SpoutCam1");
+        m_cameraName = "SpoutCam1";
     }
     
     ASSERT(phr);
@@ -457,8 +457,8 @@ CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr, REFCLSID clsid) :
     } else {
         // Fallback - create new camera if not found
         auto manager = SpoutCam::DynamicCameraManager::GetInstance();
-        m_cameraConfig = manager->CreateCamera("SpoutCam");
-        m_cameraName = "SpoutCam";
+        m_cameraConfig = manager->CreateCamera("SpoutCam1");
+        m_cameraName = "SpoutCam1";
     }
     
     ASSERT(phr);
@@ -575,7 +575,7 @@ STDMETHODIMP CVCam::get_CameraIndex(int *pCameraIndex)
 	if (!pCameraIndex) return E_POINTER;
 	// For backward compatibility - just return a simple index based on camera name
 	// Avoid expensive GetAllCameras() call during runtime
-	if (m_cameraName == "SpoutCam") {
+	if (m_cameraName == "SpoutCam1") {
 		*pCameraIndex = 0;
 	} else {
 		// Simple hash-based index for other cameras to avoid enumeration

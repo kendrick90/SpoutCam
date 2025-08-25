@@ -670,11 +670,7 @@ HRESULT CSpoutCamProperties::GetCameraIndex(int* pCameraIndex)
 // Set the correct registry path based on camera index (legacy method)
 void CSpoutCamProperties::SetRegistryPath(char* registryPath, int cameraIndex)
 {
-	if (cameraIndex == 0) {
-		strcpy_s(registryPath, 256, "Software\\Leading Edge\\SpoutCam");
-	} else {
-		sprintf_s(registryPath, 256, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
-	}
+	sprintf_s(registryPath, 256, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
 }
 
 // Get the correct registry path based on camera name (preferred method)
@@ -684,11 +680,7 @@ void CSpoutCamProperties::GetCameraRegistryPath(char* registryPath, size_t buffe
 		sprintf_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam\\%s", m_cameraName.c_str());
 	} else {
 		// Fallback to old logic for legacy compatibility
-		if (m_cameraIndex == 0) {
-			sprintf_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam\\SpoutCam");
-		} else {
-			sprintf_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam\\SpoutCam%d", m_cameraIndex + 1);
-		}
+		sprintf_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam\\SpoutCam%d", m_cameraIndex + 1);
 	}
 }
 
@@ -766,11 +758,7 @@ void CSpoutCamProperties::InitializeCameraName()
 		
 		// Fallback to default naming if no custom name found
 		if (!foundCustomName) {
-			if (m_cameraIndex == 0) {
-				wcscpy_s(cameraName, 256, L"SpoutCam");
-			} else {
-				swprintf_s(cameraName, 256, L"SpoutCam%d", m_cameraIndex + 1);
-			}
+			swprintf_s(cameraName, 256, L"SpoutCam%d", m_cameraIndex + 1);
 		}
 		
 		Static_SetText(hwndName, cameraName);
@@ -1269,11 +1257,7 @@ void CSpoutCamProperties::LoadCameraName()
 	
 	// Final fallback: use default name based on camera index
 	char defaultName[64];
-	if (m_cameraIndex == 0) {
-		strcpy_s(defaultName, "SpoutCam");
-	} else {
-		sprintf_s(defaultName, "SpoutCam%d", m_cameraIndex + 1);
-	}
+	sprintf_s(defaultName, "SpoutCam%d", m_cameraIndex + 1);
 	
 	m_cameraName = defaultName;
 	wchar_t wcameraname[256];

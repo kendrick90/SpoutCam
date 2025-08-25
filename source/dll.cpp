@@ -570,11 +570,11 @@ void InitializeTemplates() {
         cameraIndex++;
     }
     
-    // If no cameras are active, create a default SpoutCam entry
+    // If no cameras are active, create a default SpoutCam1 entry
     if (g_cTemplates == 0) {
-        auto defaultCamera = manager->CreateCamera("SpoutCam");
+        auto defaultCamera = manager->CreateCamera("SpoutCam1");
         if (defaultCamera) {
-            manager->SetCameraActive("SpoutCam", true);
+            manager->SetCameraActive("SpoutCam1", true);
             
             // Store CLSID to camera name mapping
             g_CLSIDToCameraName[defaultCamera->clsid] = defaultCamera->name;

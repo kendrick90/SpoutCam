@@ -241,11 +241,7 @@ void DeleteLegacyCameraConfiguration(int cameraIndex)
     char keyName[256];
     
     // Build registry key name (match old cam.cpp logic)
-    if (cameraIndex == 0) {
-        strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
-    } else {
-        sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
-    }
+    sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
     
     LOG("Deleting legacy configuration for camera %d (registry key: %s)\n", cameraIndex + 1, keyName);
     
@@ -395,11 +391,7 @@ bool IsCameraActive(int cameraIndex)
     
     // Fallback to old method if DLL is not available
     char searchName[32];
-    if (cameraIndex == 0) {
-        strcpy_s(searchName, "SpoutCam");  // First camera has no number
-    } else {
-        sprintf_s(searchName, "SpoutCam%d", cameraIndex + 1);  // SpoutCam2, SpoutCam3, etc.
-    }
+    sprintf_s(searchName, "SpoutCam%d", cameraIndex + 1);  // SpoutCam1, SpoutCam2, SpoutCam3, etc.
     
     for (const auto& filter : g_activeFilters) {
         if (filter.find(searchName) != std::string::npos) {
@@ -425,11 +417,7 @@ bool IsCameraActiveByIndex(int cameraIndex)
 {
     // Convert index to camera name using legacy naming convention
     char cameraName[32];
-    if (cameraIndex == 0) {
-        strcpy_s(cameraName, "SpoutCam");
-    } else {
-        sprintf_s(cameraName, "SpoutCam%d", cameraIndex + 1);
-    }
+    sprintf_s(cameraName, "SpoutCam%d", cameraIndex + 1);
     
     return IsCameraActive(cameraName);
 }
@@ -440,11 +428,7 @@ bool HasCameraSettings(int cameraIndex)
     DWORD testValue;
     
     // Build registry key name (match existing cam.cpp logic)
-    if (cameraIndex == 0) {
-        strcpy_s(keyName, "Software\\Leading Edge\\SpoutCam");
-    } else {
-        sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
-    }
+    sprintf_s(keyName, "Software\\Leading Edge\\SpoutCam%d", cameraIndex + 1);
     
     // Check if any settings exist
     bool hasFps = ReadDwordFromRegistry(HKEY_LOCAL_MACHINE, keyName, "fps", &testValue);
@@ -469,11 +453,7 @@ bool HasCameraSettingsByIndex(int cameraIndex)
 {
     // Convert index to camera name using legacy naming convention
     char cameraName[32];
-    if (cameraIndex == 0) {
-        strcpy_s(cameraName, "SpoutCam");
-    } else {
-        sprintf_s(cameraName, "SpoutCam%d", cameraIndex + 1);
-    }
+    sprintf_s(cameraName, "SpoutCam%d", cameraIndex + 1);
     
     return HasCameraSettings(cameraName);
 }
@@ -482,6 +462,13 @@ bool HasCameraSettingsByIndex(int cameraIndex)
 std::string GenerateDefaultCameraName()
 {
     auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    
+    // Start with SpoutCam1 for consistency
+    if (manager->GetCamera("SpoutCam1") == nullptr) {
+        return "SpoutCam1";
+    }
+    
+    // If SpoutCam1 exists, continue with SpoutCam2, SpoutCam3, etc.
     return manager->GenerateAvailableName("SpoutCam");
 }
 
