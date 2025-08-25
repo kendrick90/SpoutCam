@@ -346,12 +346,20 @@ static uint32_t xorshiftRand()
 //////////////////////////////////////////////////////////////////////////
 CUnknown * WINAPI CVCam::CreateInstance(LPUNKNOWN lpunk, HRESULT *phr)
 {
-    // This is the default instance - use first camera
+    // This is the default instance - use default SpoutCam camera
+    // Avoid expensive GetAllCameras() call during filter instantiation
     auto manager = SpoutCam::DynamicCameraManager::GetInstance();
-    auto cameras = manager->GetAllCameras();
-    if (!cameras.empty()) {
-        return CreateCameraInstance(lpunk, phr, cameras[0]->clsid);
+    auto camera = manager->GetCamera("SpoutCam");
+    if (camera) {
+        return CreateCameraInstance(lpunk, phr, camera->clsid);
     }
+    
+    // Fallback: create default camera if none exists
+    camera = manager->CreateCamera("SpoutCam");
+    if (camera) {
+        return CreateCameraInstance(lpunk, phr, camera->clsid);
+    }
+    
     *phr = E_FAIL;
     return nullptr;
 }
@@ -385,12 +393,11 @@ SpoutCam::DynamicCameraConfig* CVCam::FindCameraConfig(REFCLSID clsid) {
 CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr) : 
 	CSource(NAME(SPOUTCAMNAME), lpunk, CLSID_SpoutCam) //VS: replaced SpoutCamName with makro SPOUTCAMNAME, NAME() expects LPCTSTR
 {
-    // Default constructor - get first camera from manager
+    // Default constructor - get default SpoutCam camera (avoid expensive GetAllCameras)
     auto manager = SpoutCam::DynamicCameraManager::GetInstance();
-    auto cameras = manager->GetAllCameras();
-    if (!cameras.empty()) {
-        m_cameraConfig = cameras[0];
-        m_cameraName = cameras[0]->name;
+    m_cameraConfig = manager->GetCamera("SpoutCam");
+    if (m_cameraConfig) {
+        m_cameraName = m_cameraConfig->name;
     } else {
         // Create default if none exist
         m_cameraConfig = manager->CreateCamera("SpoutCam");
@@ -509,16 +516,14 @@ STDMETHODIMP CVCam::put_Settings(DWORD dwFps, DWORD dwResolution, DWORD dwMirror
 STDMETHODIMP CVCam::get_CameraIndex(int *pCameraIndex)
 {
 	if (!pCameraIndex) return E_POINTER;
-	// For backward compatibility, try to find an index
-	auto manager = SpoutCam::DynamicCameraManager::GetInstance();
-	auto cameras = manager->GetAllCameras();
-	for (int i = 0; i < (int)cameras.size(); i++) {
-		if (cameras[i] == m_cameraConfig) {
-			*pCameraIndex = i;
-			return S_OK;
-		}
+	// For backward compatibility - just return a simple index based on camera name
+	// Avoid expensive GetAllCameras() call during runtime
+	if (m_cameraName == "SpoutCam") {
+		*pCameraIndex = 0;
+	} else {
+		// Simple hash-based index for other cameras to avoid enumeration
+		*pCameraIndex = std::hash<std::string>{}(m_cameraName) % 100; // Keep within reasonable range
 	}
-	*pCameraIndex = 0; // Default
 	return S_OK;
 }
 
