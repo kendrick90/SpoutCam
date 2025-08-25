@@ -141,7 +141,7 @@
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <PostBuildEvent>
-      <Command>copy /y $(TargetPath) binaries\SPOUTCAM\SpoutCam32\SpoutCam32.ax &amp;&amp; rc source\dialog.rc &amp;&amp; cl.exe /DNDEBUG /D_WINDOWS /MT /W3 /O2 /Fe:binaries\SPOUTCAM\SpoutCamSettings32.exe source\SpoutCamSettings.cpp comctl32.lib advapi32.lib ole32.lib oleaut32.lib shell32.lib user32.lib kernel32.lib source\dialog.res /link /SUBSYSTEM:WINDOWS /MANIFESTUAC:"level='requireAdministrator' uiAccess='false'"</Command>
+      <Command>copy /y $(TargetPath) binaries\SPOUTCAM\SpoutCam32\SpoutCam32.ax &amp;&amp; rc source\dialog.rc &amp;&amp; cl.exe /DNDEBUG /D_WINDOWS /MT /W3 /O2 /Fe:binaries\SPOUTCAM\SpoutCamSettings32.exe source\SpoutCamSettings.cpp source\DynamicCameraManager.cpp comctl32.lib advapi32.lib ole32.lib oleaut32.lib shell32.lib user32.lib kernel32.lib source\dialog.res /link /SUBSYSTEM:WINDOWS /MANIFESTUAC:"level='requireAdministrator' uiAccess='false'" /IMPLIB:$(IntDir)\SpoutCamSettings32.lib</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -164,7 +164,7 @@
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <PostBuildEvent>
-      <Command>copy /y $(TargetPath) binaries\SPOUTCAM\SpoutCam64\SpoutCam64.ax &amp;&amp; rc source\dialog.rc &amp;&amp; cl.exe /DNDEBUG /D_WINDOWS /MT /W3 /O2 /Fe:binaries\SPOUTCAM\SpoutCamSettings64.exe source\SpoutCamSettings.cpp comctl32.lib advapi32.lib ole32.lib oleaut32.lib shell32.lib user32.lib kernel32.lib source\dialog.res /link /SUBSYSTEM:WINDOWS /MANIFESTUAC:"level='requireAdministrator' uiAccess='false'" /MACHINE:X64</Command>
+      <Command>copy /y $(TargetPath) binaries\SPOUTCAM\SpoutCam64\SpoutCam64.ax &amp;&amp; rc source\dialog.rc &amp;&amp; cl.exe /DNDEBUG /D_WINDOWS /MT /W3 /O2 /Fe:binaries\SPOUTCAM\SpoutCamSettings64.exe source\SpoutCamSettings.cpp source\DynamicCameraManager.cpp comctl32.lib advapi32.lib ole32.lib oleaut32.lib shell32.lib user32.lib kernel32.lib source\dialog.res /link /SUBSYSTEM:WINDOWS /MANIFESTUAC:"level='requireAdministrator' uiAccess='false'" /MACHINE:X64 /IMPLIB:$(IntDir)\SpoutCamSettings64.lib</Command>
     </PostBuildEvent>
     <Manifest>
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
@@ -191,6 +191,7 @@
     <ClCompile Include="source\cam.cpp" />
     <ClCompile Include="source\camprops.cpp" />
     <ClCompile Include="source\dll.cpp" />
+    <ClCompile Include="source\DynamicCameraManager.cpp" />
     <ClCompile Include="source\olepropframe.c" />
     <ClCompile Include="source\SpoutCamDiagnostic.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
@@ -211,6 +212,7 @@
   <ItemGroup>
     <ClInclude Include="source\cam.h" />
     <ClInclude Include="source\camprops.h" />
+    <ClInclude Include="source\DynamicCameraManager.h" />
     <ClInclude Include="source\dshowutil.h" />
     <ClInclude Include="source\resource.h" />
     <ClInclude Include="source\version.h" />

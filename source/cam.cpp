@@ -327,6 +327,7 @@
 #pragma warning(disable:4711)
 
 #include "cam.h"
+#include "DynamicCameraManager.h"
 
 // This is just a fast rand so that the static image isn't too slow for higher resolutions
 // Based on Marsaglia's xorshift generator (http://www.jstatsoft.org/v08/i14/paper)
@@ -345,11 +346,17 @@ static uint32_t xorshiftRand()
 //////////////////////////////////////////////////////////////////////////
 CUnknown * WINAPI CVCam::CreateInstance(LPUNKNOWN lpunk, HRESULT *phr)
 {
-    // This is the default instance - use camera 0
-    return CreateCameraInstance(lpunk, phr, 0);
+    // This is the default instance - use first camera
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    auto cameras = manager->GetAllCameras();
+    if (!cameras.empty()) {
+        return CreateCameraInstance(lpunk, phr, cameras[0]->clsid);
+    }
+    *phr = E_FAIL;
+    return nullptr;
 }
 
-CUnknown * WINAPI CVCam::CreateCameraInstance(LPUNKNOWN lpunk, HRESULT *phr, int cameraIndex)
+CUnknown * WINAPI CVCam::CreateCameraInstance(LPUNKNOWN lpunk, HRESULT *phr, REFCLSID clsid)
 {
     ASSERT(phr);
 
@@ -362,87 +369,70 @@ CUnknown * WINAPI CVCam::CreateCameraInstance(LPUNKNOWN lpunk, HRESULT *phr, int
 	// For clear options dialog for scaled display
 	SetProcessDPIAware();
 
-    CUnknown *punk = new CVCam(lpunk, phr, cameraIndex);
+    CUnknown *punk = new CVCam(lpunk, phr, clsid);
 
     return punk;
 }
 
-// Factory functions for each camera
-CUnknown * WINAPI CreateCamera0(LPUNKNOWN lpunk, HRESULT *phr) {
-    return CVCam::CreateCameraInstance(lpunk, phr, 0);
-}
-
-CUnknown * WINAPI CreateCamera1(LPUNKNOWN lpunk, HRESULT *phr) {
-    return CVCam::CreateCameraInstance(lpunk, phr, 1);
-}
-
-CUnknown * WINAPI CreateCamera2(LPUNKNOWN lpunk, HRESULT *phr) {
-    return CVCam::CreateCameraInstance(lpunk, phr, 2);
-}
-
-CUnknown * WINAPI CreateCamera3(LPUNKNOWN lpunk, HRESULT *phr) {
-    return CVCam::CreateCameraInstance(lpunk, phr, 3);
-}
-
-CUnknown * WINAPI CreateCamera4(LPUNKNOWN lpunk, HRESULT *phr) {
-    return CVCam::CreateCameraInstance(lpunk, phr, 4);
-}
-
-CUnknown * WINAPI CreateCamera5(LPUNKNOWN lpunk, HRESULT *phr) {
-    return CVCam::CreateCameraInstance(lpunk, phr, 5);
-}
-
-CUnknown * WINAPI CreateCamera6(LPUNKNOWN lpunk, HRESULT *phr) {
-    return CVCam::CreateCameraInstance(lpunk, phr, 6);
-}
-
-CUnknown * WINAPI CreateCamera7(LPUNKNOWN lpunk, HRESULT *phr) {
-    return CVCam::CreateCameraInstance(lpunk, phr, 7);
-}
+// Dynamic factory function - no longer need individual factories
 
 // Helper method to find camera configuration by CLSID
-int CVCam::FindCameraConfig(REFCLSID clsid) {
-    for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {
-        if (IsEqualGUID(clsid, g_CameraConfigs[i].clsid)) {
-            return i;
-        }
-    }
-    return 0; // Default to first camera if not found
+SpoutCam::DynamicCameraConfig* CVCam::FindCameraConfig(REFCLSID clsid) {
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    return manager->GetCameraByCLSID(clsid);
 }
 
 CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr) : 
 	CSource(NAME(SPOUTCAMNAME), lpunk, CLSID_SpoutCam) //VS: replaced SpoutCamName with makro SPOUTCAMNAME, NAME() expects LPCTSTR
 {
-    // Default constructor - use camera 0
-    m_cameraIndex = 0;
+    // Default constructor - get first camera from manager
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    auto cameras = manager->GetAllCameras();
+    if (!cameras.empty()) {
+        m_cameraConfig = cameras[0];
+        m_cameraName = cameras[0]->name;
+    } else {
+        // Create default if none exist
+        m_cameraConfig = manager->CreateCamera("SpoutCam");
+        m_cameraName = "SpoutCam";
+    }
     
     ASSERT(phr);
     CAutoLock cAutoLock(&m_cStateLock);
     
     // Create the one and only output pin using the first camera name
-    WCHAR wideCameraName[64];
-    MultiByteToWideChar(CP_ACP, 0, g_CameraConfigs[0].name, -1, wideCameraName, 64);
+    WCHAR wideCameraName[256];
+    MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, wideCameraName, 256);
     
     m_paStreams = (CSourceStream **)new CVCamStream*[1];
-	m_paStreams[0] = new CVCamStream(phr, this, wideCameraName, 0);
+	m_paStreams[0] = new CVCamStream(phr, this, wideCameraName, m_cameraName);
 
 	if (phr) *phr = S_OK; //VS
 }
 
-CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr, int cameraIndex) : 
-	CSource(NAME(SPOUTCAMNAME), lpunk, g_CameraConfigs[cameraIndex].clsid)
+CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr, REFCLSID clsid) : 
+	CSource(NAME(SPOUTCAMNAME), lpunk, clsid)
 {
-    m_cameraIndex = cameraIndex;
+    // Find camera by CLSID
+    m_cameraConfig = FindCameraConfig(clsid);
+    if (m_cameraConfig) {
+        m_cameraName = m_cameraConfig->name;
+    } else {
+        // Fallback - create new camera if not found
+        auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+        m_cameraConfig = manager->CreateCamera("SpoutCam");
+        m_cameraName = "SpoutCam";
+    }
     
     ASSERT(phr);
     CAutoLock cAutoLock(&m_cStateLock);
     
     // Create the one and only output pin using the specified camera name
-    WCHAR wideCameraName[64];
-    MultiByteToWideChar(CP_ACP, 0, g_CameraConfigs[cameraIndex].name, -1, wideCameraName, 64);
+    WCHAR wideCameraName[256];
+    MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, wideCameraName, 256);
     
     m_paStreams = (CSourceStream **)new CVCamStream*[1];
-	m_paStreams[0] = new CVCamStream(phr, this, wideCameraName, cameraIndex);
+	m_paStreams[0] = new CVCamStream(phr, this, wideCameraName, m_cameraName);
 
 	if (phr) *phr = S_OK; //VS
 }
@@ -501,7 +491,12 @@ STDMETHODIMP CVCam::GetPages(CAUUID *pPages)
 	pPages->pElems = (GUID *)CoTaskMemAlloc(sizeof(GUID));
 	if (pPages->pElems == NULL)
 		return E_OUTOFMEMORY;
-	pPages->pElems[0] = CLSID_SpoutCamPropertyPage;
+	// Use the property page CLSID for this camera
+	if (m_cameraConfig) {
+		pPages->pElems[0] = m_cameraConfig->propPageClsid;
+	} else {
+		pPages->pElems[0] = CLSID_SpoutCamPropertyPage;
+	}
 	return S_OK;
 }
 
@@ -514,7 +509,23 @@ STDMETHODIMP CVCam::put_Settings(DWORD dwFps, DWORD dwResolution, DWORD dwMirror
 STDMETHODIMP CVCam::get_CameraIndex(int *pCameraIndex)
 {
 	if (!pCameraIndex) return E_POINTER;
-	*pCameraIndex = m_cameraIndex;
+	// For backward compatibility, try to find an index
+	auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+	auto cameras = manager->GetAllCameras();
+	for (int i = 0; i < (int)cameras.size(); i++) {
+		if (cameras[i] == m_cameraConfig) {
+			*pCameraIndex = i;
+			return S_OK;
+		}
+	}
+	*pCameraIndex = 0; // Default
+	return S_OK;
+}
+
+STDMETHODIMP CVCam::get_CameraName(char *pCameraName, int bufferSize)
+{
+	if (!pCameraName || bufferSize <= 0) return E_POINTER;
+	strncpy_s(pCameraName, bufferSize, m_cameraName.c_str(), _TRUNCATE);
 	return S_OK;
 }
 
@@ -653,8 +664,8 @@ HRESULT CVCamStream::put_Settings(DWORD dwFps, DWORD dwResolution, DWORD dwMirro
 // CVCamStream is the one and only output pin of CVCam which handles 
 // all the stuff.
 //////////////////////////////////////////////////////////////////////////
-CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName, int cameraIndex) :
-	CSourceStream(NAME(SPOUTCAMNAME), phr, pParent, pPinName), m_pParent(pParent), m_cameraIndex(cameraIndex) //VS: replaced SpoutCamName with makro SPOUTCAMNAME, NAME() expects LPCTSTR
+CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName, const std::string& cameraName) :
+	CSourceStream(NAME(SPOUTCAMNAME), phr, pParent, pPinName), m_pParent(pParent), m_cameraName(cameraName) //VS: replaced SpoutCamName with makro SPOUTCAMNAME, NAME() expects LPCTSTR
 {
 	bDXinitialized  = false; // DirectX
 	bMemoryMode		= false; // Default mode is texture, true means memoryshare
@@ -708,10 +719,10 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName, int cam
 	//
 	
 	// Create camera-specific registry path
-	if (m_cameraIndex == 0) {
+	if (m_cameraName == "SpoutCam") {
 		strcpy_s(m_registryPath, 256, "Software\\Leading Edge\\SpoutCam");
 	} else {
-		sprintf_s(m_registryPath, 256, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
+		sprintf_s(m_registryPath, 256, "Software\\Leading Edge\\SpoutCam\\%s", m_cameraName.c_str());
 	}
 	
 	// Fps from SpoutCamSettings (default 3 = 30)

@@ -38,18 +38,18 @@
 // we need a LPCTSTR for the NAME() makros in debug mode
 #define SPOUTCAMNAME "SpoutCam Settings"
 
-// Multiple camera support - configure how many cameras you want (1-8)
-#define MAX_SPOUT_CAMERAS 8
+// Dynamic camera support - no longer limited to fixed number
+#include "DynamicCameraManager.h"
 
-// Structure to hold camera configuration
+// For backward compatibility, keep the structure but it will be populated dynamically
 struct SpoutCamConfig {
     const char* name;
     GUID clsid;
     GUID propPageClsid;
 };
 
-// Camera configurations array - each camera needs unique CLSID and name
-extern SpoutCamConfig g_CameraConfigs[MAX_SPOUT_CAMERAS];
+// This will be populated dynamically from DynamicCameraManager
+extern std::vector<SpoutCamConfig> g_DynamicCameraConfigs;
 
 extern "C" {
 	DECLARE_INTERFACE_(ICamSettings, IUnknown)
@@ -81,18 +81,19 @@ class CVCam : public CSource,
 	public ICamSettings//VS
 {
 private:
-    int m_cameraIndex; // Index into g_CameraConfigs array
+    std::string m_cameraName; // Camera name instead of index
+    SpoutCam::DynamicCameraConfig* m_cameraConfig; // Pointer to dynamic config
     
 public:
     // Helper method to find camera configuration by CLSID
-    int FindCameraConfig(REFCLSID clsid);
-    const SpoutCamConfig* GetCameraConfig() const { return &g_CameraConfigs[m_cameraIndex]; }
+    SpoutCam::DynamicCameraConfig* FindCameraConfig(REFCLSID clsid);
+    const SpoutCam::DynamicCameraConfig* GetCameraConfig() const { return m_cameraConfig; }
     //////////////////////////////////////////////////////////////////////////
     //  IUnknown
     //////////////////////////////////////////////////////////////////////////
     static CUnknown * WINAPI CreateInstance(LPUNKNOWN lpunk, HRESULT *phr);
-    // Template method that creates instance for specific camera index
-    static CUnknown * WINAPI CreateCameraInstance(LPUNKNOWN lpunk, HRESULT *phr, int cameraIndex);
+    // Template method that creates instance for specific camera by CLSID
+    static CUnknown * WINAPI CreateCameraInstance(LPUNKNOWN lpunk, HRESULT *phr, REFCLSID clsid);
     STDMETHODIMP QueryInterface(REFIID riid, void **ppv);
 
 	// LJ additons
@@ -109,12 +110,13 @@ public:
 	// ICamSettings interface
 	STDMETHODIMP put_Settings(DWORD dwFps, DWORD dwResolution, DWORD dwMirror, DWORD dwSwap, DWORD dwFlip, const char *name);
 	STDMETHODIMP get_CameraIndex(int *pCameraIndex);
+	STDMETHODIMP get_CameraName(char *pCameraName, int bufferSize);
 	//<==================== VS-END ======================>
 
 private:
 
     CVCam(LPUNKNOWN lpunk, HRESULT *phr);
-    CVCam(LPUNKNOWN lpunk, HRESULT *phr, int cameraIndex); // Constructor with camera index
+    CVCam(LPUNKNOWN lpunk, HRESULT *phr, REFCLSID clsid); // Constructor with CLSID
 
 /////////////////////////////////////
 // all inherited virtual functions //
@@ -151,7 +153,7 @@ public:
 class CVCamStream : public CSourceStream, public IAMStreamConfig, public IKsPropertySet, public IAMDroppedFrames
 {
 private:
-    int m_cameraIndex; // Index of which camera this stream belongs to
+    std::string m_cameraName; // Name of which camera this stream belongs to
     char m_registryPath[256]; // Camera-specific registry path
 
 public:
@@ -216,7 +218,7 @@ public:
 	//////////////////////////////////////////////////////////////////////////
     //  CSourceStream
     //////////////////////////////////////////////////////////////////////////
-    CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName, int cameraIndex = 0);
+    CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName, const std::string& cameraName = "SpoutCam");
     ~CVCamStream();
 
     HRESULT FillBuffer(IMediaSample *pms);

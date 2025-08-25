@@ -16,6 +16,9 @@
 #include <stdio.h>
 #include <conio.h>
 #include "cam.h"
+#include "DynamicCameraManager.h"
+#include <vector>
+#include <string>
 
 //<==================== VS-START ====================>
 #ifdef DIALOG_WITHOUT_REGISTRATION
@@ -45,62 +48,13 @@ const WCHAR SpoutCamName[] = L"" SPOUTCAMNAME;
 //<==================== VS-END ======================>
 
 //
-// MULTIPLE CAMERA SUPPORT - AUTOMATED CLSID GENERATION
+// DYNAMIC CAMERA SUPPORT - UNLIMITED CAMERAS
 //
-// The system now automatically generates unique CLSIDs for each camera.
-// Configure the number of cameras by changing MAX_SPOUT_CAMERAS in cam.h
+// The system now dynamically generates CLSIDs based on camera names.
+// No longer limited to a fixed number of cameras.
 //
-// Camera configurations with unique CLSIDs and names
-SpoutCamConfig g_CameraConfigs[MAX_SPOUT_CAMERAS] = {
-    // Camera 1 - Original SpoutCam
-    {
-        "SpoutCam",
-        {0x8e14549a, 0xdb61, 0x4309, 0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x33},
-        {0xcd7780b7, 0x40d2, 0x4f33, 0x80, 0xe2, 0xb0, 0x2e, 0x0, 0x9c, 0xe6, 0x3f}
-    },
-    // Camera 2 - SpoutCam2
-    {
-        "SpoutCam2", 
-        {0x8e14549a, 0xdb61, 0x4309, 0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x34},
-        {0xcd7780b7, 0x40d2, 0x4f33, 0x80, 0xe2, 0xb0, 0x2e, 0x0, 0x9c, 0xe6, 0x40}
-    },
-    // Camera 3 - SpoutCam3
-    {
-        "SpoutCam3",
-        {0x8e14549a, 0xdb61, 0x4309, 0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x35},
-        {0xcd7780b7, 0x40d2, 0x4f33, 0x80, 0xe2, 0xb0, 0x2e, 0x0, 0x9c, 0xe6, 0x41}
-    },
-    // Camera 4 - SpoutCam4
-    {
-        "SpoutCam4",
-        {0x8e14549a, 0xdb61, 0x4309, 0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x36},
-        {0xcd7780b7, 0x40d2, 0x4f33, 0x80, 0xe2, 0xb0, 0x2e, 0x0, 0x9c, 0xe6, 0x42}
-    },
-    // Camera 5 - SpoutCam5
-    {
-        "SpoutCam5",
-        {0x8e14549a, 0xdb61, 0x4309, 0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x37},
-        {0xcd7780b7, 0x40d2, 0x4f33, 0x80, 0xe2, 0xb0, 0x2e, 0x0, 0x9c, 0xe6, 0x43}
-    },
-    // Camera 6 - SpoutCam6
-    {
-        "SpoutCam6",
-        {0x8e14549a, 0xdb61, 0x4309, 0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x38},
-        {0xcd7780b7, 0x40d2, 0x4f33, 0x80, 0xe2, 0xb0, 0x2e, 0x0, 0x9c, 0xe6, 0x44}
-    },
-    // Camera 7 - SpoutCam7
-    {
-        "SpoutCam7",
-        {0x8e14549a, 0xdb61, 0x4309, 0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x39},
-        {0xcd7780b7, 0x40d2, 0x4f33, 0x80, 0xe2, 0xb0, 0x2e, 0x0, 0x9c, 0xe6, 0x45}
-    },
-    // Camera 8 - SpoutCam8
-    {
-        "SpoutCam8",
-        {0x8e14549a, 0xdb61, 0x4309, 0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x3a},
-        {0xcd7780b7, 0x40d2, 0x4f33, 0x80, 0xe2, 0xb0, 0x2e, 0x0, 0x9c, 0xe6, 0x46}
-    }
-};
+// Dynamic camera configurations vector
+std::vector<SpoutCamConfig> g_DynamicCameraConfigs;
 
 // Keep the original CLSID for backward compatibility
 DEFINE_GUID(CLSID_SpoutCam, 0x8e14549a, 0xdb61, 0x4309, 0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x33);
@@ -136,130 +90,110 @@ const AMOVIESETUP_PIN AMSPinVCam=
     &AMSMediaTypesVCam     // Pointer to media types
 };
 
-// Filter setup arrays for each camera
-AMOVIESETUP_FILTER AMSFilters[MAX_SPOUT_CAMERAS];
-WCHAR CameraNames[MAX_SPOUT_CAMERAS][64];
+// Dynamic filter setup arrays
+std::vector<AMOVIESETUP_FILTER> AMSFilters;
+std::vector<std::wstring> CameraNames;
 
-// Registry helper functions
-bool ReadCustomCameraName(int cameraIndex, char* nameBuffer, int bufferSize) {
-    // Try to find a custom name for this camera slot
-    HKEY camerasKey;
-    LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam\\Cameras", 0, KEY_READ, &camerasKey);
-    if (result != ERROR_SUCCESS) {
-        return false; // No custom cameras registry
-    }
-    
-    DWORD subkeyCount = 0;
-    DWORD maxSubkeyLen = 0;
-    result = RegQueryInfoKeyA(camerasKey, nullptr, nullptr, nullptr, &subkeyCount, &maxSubkeyLen, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
-    
-    if (result == ERROR_SUCCESS && maxSubkeyLen > 0) {
-        char* subkeyName = new char[maxSubkeyLen + 1];
-        
-        for (DWORD i = 0; i < subkeyCount; i++) {
-            DWORD subkeyNameLen = maxSubkeyLen + 1;
-            if (RegEnumKeyExA(camerasKey, i, subkeyName, &subkeyNameLen, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-                // Check if this camera entry matches our camera index
-                char cameraPath[512];
-                sprintf_s(cameraPath, "Software\\Leading Edge\\SpoutCam\\Cameras\\%s", subkeyName);
-                
-                HKEY cameraKey;
-                if (RegOpenKeyExA(HKEY_CURRENT_USER, cameraPath, 0, KEY_READ, &cameraKey) == ERROR_SUCCESS) {
-                    char slotStr[16];
-                    DWORD type = REG_SZ;
-                    DWORD size = sizeof(slotStr);
-                    if (RegQueryValueExA(cameraKey, "slotIndex", nullptr, &type, (LPBYTE)slotStr, &size) == ERROR_SUCCESS) {
-                        int slotIndex = atoi(slotStr);
-                        if (slotIndex == cameraIndex) {
-                            // Found a custom name for this camera slot
-                            strncpy_s(nameBuffer, bufferSize, subkeyName, _TRUNCATE);
-                            RegCloseKey(cameraKey);
-                            delete[] subkeyName;
-                            RegCloseKey(camerasKey);
-                            return true;
-                        }
-                    }
-                    RegCloseKey(cameraKey);
-                }
-            }
-        }
-        delete[] subkeyName;
-    }
-    
-    RegCloseKey(camerasKey);
-    return false;
-}
+// Registry helper functions - now handled by DynamicCameraManager
 
-// Initialize filter setups
+// Initialize filter setups from dynamic camera manager
 void InitializeFilterSetups() {
-    for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {
-        char customName[256];
-        const char* nameToUse;
-        
-        // Try to get custom name from registry first
-        if (ReadCustomCameraName(i, customName, sizeof(customName))) {
-            nameToUse = customName;
-        } else {
-            // Fall back to default name
-            nameToUse = g_CameraConfigs[i].name;
-        }
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    auto cameras = manager->GetAllCameras();
+    
+    // Clear existing
+    g_DynamicCameraConfigs.clear();
+    AMSFilters.clear();
+    CameraNames.clear();
+    
+    // Create configs for each dynamic camera
+    for (auto camera : cameras) {
+        SpoutCamConfig config;
+        config.name = _strdup(camera->name.c_str());
+        config.clsid = camera->clsid;
+        config.propPageClsid = camera->propPageClsid;
+        g_DynamicCameraConfigs.push_back(config);
         
         // Convert camera name to wide string
-        MultiByteToWideChar(CP_ACP, 0, nameToUse, -1, CameraNames[i], 64);
+        WCHAR wideName[256];
+        MultiByteToWideChar(CP_ACP, 0, camera->name.c_str(), -1, wideName, 256);
+        CameraNames.push_back(std::wstring(wideName));
         
-        AMSFilters[i].clsID = &g_CameraConfigs[i].clsid;
-        AMSFilters[i].strName = CameraNames[i];
-        AMSFilters[i].dwMerit = MERIT_DO_NOT_USE;
-        AMSFilters[i].nPins = 1;
-        AMSFilters[i].lpPin = &AMSPinVCam;
+        // Create filter setup
+        AMOVIESETUP_FILTER filter;
+        filter.clsID = &g_DynamicCameraConfigs.back().clsid;
+        filter.strName = CameraNames.back().c_str();
+        filter.dwMerit = MERIT_DO_NOT_USE;
+        filter.nPins = 1;
+        filter.lpPin = &AMSPinVCam;
+        AMSFilters.push_back(filter);
     }
 }
 
-// Forward declarations of camera factory functions
-extern CUnknown * WINAPI CreateCamera0(LPUNKNOWN lpunk, HRESULT *phr);
-extern CUnknown * WINAPI CreateCamera1(LPUNKNOWN lpunk, HRESULT *phr);
-extern CUnknown * WINAPI CreateCamera2(LPUNKNOWN lpunk, HRESULT *phr);
-extern CUnknown * WINAPI CreateCamera3(LPUNKNOWN lpunk, HRESULT *phr);
-extern CUnknown * WINAPI CreateCamera4(LPUNKNOWN lpunk, HRESULT *phr);
-extern CUnknown * WINAPI CreateCamera5(LPUNKNOWN lpunk, HRESULT *phr);
-extern CUnknown * WINAPI CreateCamera6(LPUNKNOWN lpunk, HRESULT *phr);
-extern CUnknown * WINAPI CreateCamera7(LPUNKNOWN lpunk, HRESULT *phr);
+// Dynamic camera factory function
+CUnknown * WINAPI CreateDynamicCamera(LPUNKNOWN lpunk, HRESULT *phr, const GUID& clsid) {
+    return CVCam::CreateCameraInstance(lpunk, phr, clsid);
+}
 
-// Array of factory functions
-static LPFNNewCOMObject CameraFactories[MAX_SPOUT_CAMERAS] = {
-    CreateCamera0,
-    CreateCamera1,
-    CreateCamera2,
-    CreateCamera3,
-    CreateCamera4,
-    CreateCamera5,
-    CreateCamera6,
-    CreateCamera7
+// Maximum supported dynamic cameras
+#define MAX_DYNAMIC_CAMERAS 256
+
+// Static array for DirectShow compatibility
+CFactoryTemplate g_Templates[MAX_DYNAMIC_CAMERAS * 2];
+int g_cTemplates = 0;
+
+// Factory function wrapper that finds camera by CLSID
+CUnknown * WINAPI CreateCameraByIndex(int index, LPUNKNOWN lpunk, HRESULT *phr) {
+    if (index >= 0 && index < (int)g_DynamicCameraConfigs.size()) {
+        return CVCam::CreateCameraInstance(lpunk, phr, g_DynamicCameraConfigs[index].clsid);
+    }
+    *phr = E_FAIL;
+    return nullptr;
+}
+
+// Individual factory functions for each potential camera (DirectShow needs static functions)
+#define MAKE_CAMERA_FACTORY(n) \
+CUnknown * WINAPI CreateCamera##n(LPUNKNOWN lpunk, HRESULT *phr) { \
+    return CreateCameraByIndex(n, lpunk, phr); \
+}
+
+// Generate factory functions for up to 128 cameras
+MAKE_CAMERA_FACTORY(0)  MAKE_CAMERA_FACTORY(1)  MAKE_CAMERA_FACTORY(2)  MAKE_CAMERA_FACTORY(3)
+MAKE_CAMERA_FACTORY(4)  MAKE_CAMERA_FACTORY(5)  MAKE_CAMERA_FACTORY(6)  MAKE_CAMERA_FACTORY(7)
+MAKE_CAMERA_FACTORY(8)  MAKE_CAMERA_FACTORY(9)  MAKE_CAMERA_FACTORY(10) MAKE_CAMERA_FACTORY(11)
+MAKE_CAMERA_FACTORY(12) MAKE_CAMERA_FACTORY(13) MAKE_CAMERA_FACTORY(14) MAKE_CAMERA_FACTORY(15)
+
+// Array of factory function pointers
+static LPFNNewCOMObject g_CameraFactories[] = {
+    CreateCamera0,  CreateCamera1,  CreateCamera2,  CreateCamera3,
+    CreateCamera4,  CreateCamera5,  CreateCamera6,  CreateCamera7,
+    CreateCamera8,  CreateCamera9,  CreateCamera10, CreateCamera11,
+    CreateCamera12, CreateCamera13, CreateCamera14, CreateCamera15
 };
 
-// Static factory templates array - DirectShow requires this to be statically defined
-CFactoryTemplate g_Templates[MAX_SPOUT_CAMERAS * 2]; // Each camera + its property page
-int g_cTemplates = MAX_SPOUT_CAMERAS * 2;
-
-// Initialize templates
+// Initialize templates dynamically
 void InitializeTemplates() {
     InitializeFilterSetups();
     
+    g_cTemplates = 0;
+    
     // Create templates for each camera and its property page
-    for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {
+    for (size_t i = 0; i < g_DynamicCameraConfigs.size() && i < 16; i++) {
         // Camera template
-        g_Templates[i * 2].m_Name = CameraNames[i];
-        g_Templates[i * 2].m_ClsID = &g_CameraConfigs[i].clsid;
-        g_Templates[i * 2].m_lpfnNew = CameraFactories[i];
-        g_Templates[i * 2].m_lpfnInit = nullptr;
-        g_Templates[i * 2].m_pAMovieSetup_Filter = &AMSFilters[i];
+        g_Templates[g_cTemplates].m_Name = CameraNames[i].c_str();
+        g_Templates[g_cTemplates].m_ClsID = &g_DynamicCameraConfigs[i].clsid;
+        g_Templates[g_cTemplates].m_lpfnNew = g_CameraFactories[i];
+        g_Templates[g_cTemplates].m_lpfnInit = nullptr;
+        g_Templates[g_cTemplates].m_pAMovieSetup_Filter = &AMSFilters[i];
+        g_cTemplates++;
         
         // Property page template
-        g_Templates[i * 2 + 1].m_Name = L"Settings";
-        g_Templates[i * 2 + 1].m_ClsID = &g_CameraConfigs[i].propPageClsid;
-        g_Templates[i * 2 + 1].m_lpfnNew = CSpoutCamProperties::CreateInstance;
-        g_Templates[i * 2 + 1].m_lpfnInit = nullptr;
-        g_Templates[i * 2 + 1].m_pAMovieSetup_Filter = nullptr;
+        g_Templates[g_cTemplates].m_Name = L"Settings";
+        g_Templates[g_cTemplates].m_ClsID = &g_DynamicCameraConfigs[i].propPageClsid;
+        g_Templates[g_cTemplates].m_lpfnNew = CSpoutCamProperties::CreateInstance;
+        g_Templates[g_cTemplates].m_lpfnInit = nullptr;
+        g_Templates[g_cTemplates].m_pAMovieSetup_Filter = nullptr;
+        g_cTemplates++;
     }
 }
 
@@ -294,11 +228,11 @@ STDAPI RegisterFilters( BOOL bRegister )
         // Refresh camera names from registry before registration
         InitializeFilterSetups();
         
-        // Register all cameras and their property pages
-        for (int i = 0; i < MAX_SPOUT_CAMERAS && SUCCEEDED(hr); i++) {
-            hr = AMovieSetupRegisterServer(g_CameraConfigs[i].clsid, CameraNames[i], achFileName, L"Both", L"InprocServer32");
+        // Register all dynamic cameras and their property pages
+        for (size_t i = 0; i < g_DynamicCameraConfigs.size() && SUCCEEDED(hr); i++) {
+            hr = AMovieSetupRegisterServer(g_DynamicCameraConfigs[i].clsid, CameraNames[i].c_str(), achFileName, L"Both", L"InprocServer32");
             if (SUCCEEDED(hr)) {
-                hr = AMovieSetupRegisterServer(g_CameraConfigs[i].propPageClsid, L"Settings", achFileName, L"Both", L"InprocServer32");
+                hr = AMovieSetupRegisterServer(g_DynamicCameraConfigs[i].propPageClsid, L"Settings", achFileName, L"Both", L"InprocServer32");
             }
         }
     }
@@ -312,21 +246,21 @@ STDAPI RegisterFilters( BOOL bRegister )
             if(bRegister)
             {
                 // Register each camera as a video input device
-                for (int i = 0; i < MAX_SPOUT_CAMERAS && SUCCEEDED(hr); i++) {
+                for (size_t i = 0; i < g_DynamicCameraConfigs.size() && SUCCEEDED(hr); i++) {
                     IMoniker *pMoniker = 0;
                     REGFILTER2 rf2;
                     rf2.dwVersion = 1;
                     rf2.dwMerit = MERIT_DO_NOT_USE;
                     rf2.cPins = 1;
                     rf2.rgPins = &AMSPinVCam;
-                    hr = fm->RegisterFilter(g_CameraConfigs[i].clsid, CameraNames[i], &pMoniker, &CLSID_VideoInputDeviceCategory, NULL, &rf2);
+                    hr = fm->RegisterFilter(g_DynamicCameraConfigs[i].clsid, CameraNames[i].c_str(), &pMoniker, &CLSID_VideoInputDeviceCategory, NULL, &rf2);
                 }
             }
             else
             {
                 // Unregister each camera
-                for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {
-                    fm->UnregisterFilter(&CLSID_VideoInputDeviceCategory, 0, g_CameraConfigs[i].clsid);
+                for (size_t i = 0; i < g_DynamicCameraConfigs.size(); i++) {
+                    fm->UnregisterFilter(&CLSID_VideoInputDeviceCategory, 0, g_DynamicCameraConfigs[i].clsid);
                 }
             }
         }
@@ -336,7 +270,9 @@ STDAPI RegisterFilters( BOOL bRegister )
           fm->Release();
     }
 
-    return RegisterSingleCameraFilter(bRegister, -1); // Register all cameras (legacy behavior)
+    CoFreeUnusedLibraries();
+    CoUninitialize();
+    return hr;
 }
 
 HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
@@ -359,18 +295,18 @@ HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
         // Refresh camera names from registry before registration
         InitializeFilterSetups();
         
-        if (cameraIndex >= 0 && cameraIndex < MAX_SPOUT_CAMERAS) {
+        if (cameraIndex >= 0 && cameraIndex < (int)g_DynamicCameraConfigs.size()) {
             // Register single camera and its property page
-            hr = AMovieSetupRegisterServer(g_CameraConfigs[cameraIndex].clsid, CameraNames[cameraIndex], achFileName, L"Both", L"InprocServer32");
+            hr = AMovieSetupRegisterServer(g_DynamicCameraConfigs[cameraIndex].clsid, CameraNames[cameraIndex].c_str(), achFileName, L"Both", L"InprocServer32");
             if (SUCCEEDED(hr)) {
-                hr = AMovieSetupRegisterServer(g_CameraConfigs[cameraIndex].propPageClsid, L"Settings", achFileName, L"Both", L"InprocServer32");
+                hr = AMovieSetupRegisterServer(g_DynamicCameraConfigs[cameraIndex].propPageClsid, L"Settings", achFileName, L"Both", L"InprocServer32");
             }
         } else {
             // Register all cameras and their property pages
-            for (int i = 0; i < MAX_SPOUT_CAMERAS && SUCCEEDED(hr); i++) {
-                hr = AMovieSetupRegisterServer(g_CameraConfigs[i].clsid, CameraNames[i], achFileName, L"Both", L"InprocServer32");
+            for (size_t i = 0; i < g_DynamicCameraConfigs.size() && SUCCEEDED(hr); i++) {
+                hr = AMovieSetupRegisterServer(g_DynamicCameraConfigs[i].clsid, CameraNames[i].c_str(), achFileName, L"Both", L"InprocServer32");
                 if (SUCCEEDED(hr)) {
-                    hr = AMovieSetupRegisterServer(g_CameraConfigs[i].propPageClsid, L"Settings", achFileName, L"Both", L"InprocServer32");
+                    hr = AMovieSetupRegisterServer(g_DynamicCameraConfigs[i].propPageClsid, L"Settings", achFileName, L"Both", L"InprocServer32");
                 }
             }
         }
@@ -385,7 +321,7 @@ HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
             if(bRegister)
             {
                 // Ensure camera names are up to date for filter registration too
-                if (cameraIndex >= 0 && cameraIndex < MAX_SPOUT_CAMERAS) {
+                if (cameraIndex >= 0 && cameraIndex < (int)g_DynamicCameraConfigs.size()) {
                     // Register single camera as a video input device
                     IMoniker *pMoniker = 0;
                     REGFILTER2 rf2;
@@ -393,29 +329,29 @@ HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
                     rf2.dwMerit = MERIT_DO_NOT_USE;
                     rf2.cPins = 1;
                     rf2.rgPins = &AMSPinVCam;
-                    hr = fm->RegisterFilter(g_CameraConfigs[cameraIndex].clsid, CameraNames[cameraIndex], &pMoniker, &CLSID_VideoInputDeviceCategory, NULL, &rf2);
+                    hr = fm->RegisterFilter(g_DynamicCameraConfigs[cameraIndex].clsid, CameraNames[cameraIndex].c_str(), &pMoniker, &CLSID_VideoInputDeviceCategory, NULL, &rf2);
                 } else {
                     // Register each camera as a video input device
-                    for (int i = 0; i < MAX_SPOUT_CAMERAS && SUCCEEDED(hr); i++) {
+                    for (size_t i = 0; i < g_DynamicCameraConfigs.size() && SUCCEEDED(hr); i++) {
                         IMoniker *pMoniker = 0;
                         REGFILTER2 rf2;
                         rf2.dwVersion = 1;
                         rf2.dwMerit = MERIT_DO_NOT_USE;
                         rf2.cPins = 1;
                         rf2.rgPins = &AMSPinVCam;
-                        hr = fm->RegisterFilter(g_CameraConfigs[i].clsid, CameraNames[i], &pMoniker, &CLSID_VideoInputDeviceCategory, NULL, &rf2);
+                        hr = fm->RegisterFilter(g_DynamicCameraConfigs[i].clsid, CameraNames[i].c_str(), &pMoniker, &CLSID_VideoInputDeviceCategory, NULL, &rf2);
                     }
                 }
             }
             else
             {
-                if (cameraIndex >= 0 && cameraIndex < MAX_SPOUT_CAMERAS) {
+                if (cameraIndex >= 0 && cameraIndex < (int)g_DynamicCameraConfigs.size()) {
                     // Unregister single camera
-                    fm->UnregisterFilter(&CLSID_VideoInputDeviceCategory, 0, g_CameraConfigs[cameraIndex].clsid);
+                    fm->UnregisterFilter(&CLSID_VideoInputDeviceCategory, 0, g_DynamicCameraConfigs[cameraIndex].clsid);
                 } else {
                     // Unregister each camera
-                    for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {
-                        fm->UnregisterFilter(&CLSID_VideoInputDeviceCategory, 0, g_CameraConfigs[i].clsid);
+                    for (size_t i = 0; i < g_DynamicCameraConfigs.size(); i++) {
+                        fm->UnregisterFilter(&CLSID_VideoInputDeviceCategory, 0, g_DynamicCameraConfigs[i].clsid);
                     }
                 }
             }
@@ -428,15 +364,15 @@ HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
 
 	if (SUCCEEDED(hr) && !bRegister)
 	{
-        if (cameraIndex >= 0 && cameraIndex < MAX_SPOUT_CAMERAS) {
+        if (cameraIndex >= 0 && cameraIndex < (int)g_DynamicCameraConfigs.size()) {
             // Unregister single camera and property page
-            AMovieSetupUnregisterServer(g_CameraConfigs[cameraIndex].clsid);
-            AMovieSetupUnregisterServer(g_CameraConfigs[cameraIndex].propPageClsid);
+            AMovieSetupUnregisterServer(g_DynamicCameraConfigs[cameraIndex].clsid);
+            AMovieSetupUnregisterServer(g_DynamicCameraConfigs[cameraIndex].propPageClsid);
         } else {
             // Unregister all cameras and property pages
-            for (int i = 0; i < MAX_SPOUT_CAMERAS; i++) {
-                AMovieSetupUnregisterServer(g_CameraConfigs[i].clsid);
-                AMovieSetupUnregisterServer(g_CameraConfigs[i].propPageClsid);
+            for (size_t i = 0; i < g_DynamicCameraConfigs.size(); i++) {
+                AMovieSetupUnregisterServer(g_DynamicCameraConfigs[i].clsid);
+                AMovieSetupUnregisterServer(g_DynamicCameraConfigs[i].propPageClsid);
             }
         }
 	}
@@ -474,20 +410,15 @@ extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE UnregisterSingleSpoutCam
 // External function to get the name that will be used for a camera index
 extern "C" __declspec(dllexport) BOOL STDAPICALLTYPE GetSpoutCameraName(int cameraIndex, char* nameBuffer, int bufferSize)
 {
-    if (cameraIndex < 0 || cameraIndex >= MAX_SPOUT_CAMERAS || !nameBuffer || bufferSize <= 0) {
+    if (cameraIndex < 0 || cameraIndex >= (int)g_DynamicCameraConfigs.size() || !nameBuffer || bufferSize <= 0) {
         return FALSE;
     }
     
     char customName[256];
     const char* nameToUse;
     
-    // Try to get custom name from registry first
-    if (ReadCustomCameraName(cameraIndex, customName, sizeof(customName))) {
-        nameToUse = customName;
-    } else {
-        // Fall back to default name
-        nameToUse = g_CameraConfigs[cameraIndex].name;
-    }
+    // Use dynamic camera name
+    nameToUse = g_DynamicCameraConfigs[cameraIndex].name;
     
     strncpy_s(nameBuffer, bufferSize, nameToUse, _TRUNCATE);
     return TRUE;
@@ -520,8 +451,8 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCamera(HWND h
 	}
 	
 	// Validate camera index
-	if (cameraIndex < 0 || cameraIndex >= MAX_SPOUT_CAMERAS) {
-		printf("ERROR: Invalid camera index %d (valid range: 0-%d)\n", cameraIndex, MAX_SPOUT_CAMERAS-1);
+	if (cameraIndex < 0 || cameraIndex >= (int)g_DynamicCameraConfigs.size()) {
+		printf("ERROR: Invalid camera index %d (valid range: 0-%d)\n", cameraIndex, (int)g_DynamicCameraConfigs.size()-1);
 		printf("Using camera 0 instead\n");
 		cameraIndex = 0;
 	}
@@ -539,7 +470,13 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCamera(HWND h
 
 	// Create the specific camera instance
 	printf("ConfigureSpoutCamera: Creating camera instance %d...\n", cameraIndex);
-	pInstance = CVCam::CreateCameraInstance(nullptr, &hr, cameraIndex);
+	if (cameraIndex >= 0 && cameraIndex < (int)g_DynamicCameraConfigs.size()) {
+		pInstance = CVCam::CreateCameraInstance(nullptr, &hr, g_DynamicCameraConfigs[cameraIndex].clsid);
+	} else {
+		printf("ConfigureSpoutCamera: Invalid camera index\n");
+		hr = E_FAIL;
+		pInstance = nullptr;
+	}
 	if (SUCCEEDED(hr))
 	{
 		printf("ConfigureSpoutCamera: Camera instance created successfully\n");
@@ -611,8 +548,8 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCameraFromFil
 	}
 	
 	// Validate camera index
-	if (cameraIndex < 0 || cameraIndex >= MAX_SPOUT_CAMERAS) {
-		printf("ERROR: Invalid camera index %d (valid range: 0-%d)\n", cameraIndex, MAX_SPOUT_CAMERAS-1);
+	if (cameraIndex < 0 || cameraIndex >= (int)g_DynamicCameraConfigs.size()) {
+		printf("ERROR: Invalid camera index %d (valid range: 0-%d)\n", cameraIndex, (int)g_DynamicCameraConfigs.size()-1);
 		printf("Using camera 0 instead\n");
 		cameraIndex = 0;
 	}
@@ -630,7 +567,13 @@ extern "C" __declspec(dllexport) void STDAPICALLTYPE ConfigureSpoutCameraFromFil
 
 	// Create the specific camera instance
 	printf("ConfigureSpoutCameraFromFile: Creating camera instance %d...\n", cameraIndex);
-	pInstance = CVCam::CreateCameraInstance(nullptr, &hr, cameraIndex);
+	if (cameraIndex >= 0 && cameraIndex < (int)g_DynamicCameraConfigs.size()) {
+		pInstance = CVCam::CreateCameraInstance(nullptr, &hr, g_DynamicCameraConfigs[cameraIndex].clsid);
+	} else {
+		printf("ConfigureSpoutCameraFromFile: Invalid camera index\n");
+		hr = E_FAIL;
+		pInstance = nullptr;
+	}
 	if (SUCCEEDED(hr))
 	{
 		printf("ConfigureSpoutCameraFromFile: Camera instance created successfully\n");

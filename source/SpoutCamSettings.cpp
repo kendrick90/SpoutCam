@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 #include "resource.h"
+#include "DynamicCameraManager.h"
 
 // Utility function for basic logging
 void LogWithTimestamp(const char* format, ...) {
@@ -33,68 +34,8 @@ void LogWithTimestamp(const char* format, ...) {
 std::vector<std::string> g_registeredFilters;
 bool g_filtersScanned = false;
 
-// Dynamic camera management structures
-struct DynamicCamera {
-    std::string name;
-    int slotIndex;  // Maps to existing DLL camera slot (0-3)
-    GUID clsid;
-    GUID propPageClsid;
-    bool isRegistered;
-    bool hasSettings;
-};
-
-std::vector<DynamicCamera> g_dynamicCameras;
+// Dynamic camera management - now uses DynamicCameraManager
 bool g_camerasScanned = false;
-
-// Predefined camera configurations from DLL (matching dll.cpp)
-struct StaticCameraConfig {
-    const char* defaultName;
-    GUID clsid;
-    GUID propPageClsid;
-#define MAX_DYNAMIC_CAMERAS 8
-
-} g_StaticCameraConfigs[MAX_DYNAMIC_CAMERAS] = {
-    {
-        "SpoutCam",
-        {0x8e14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x33}},
-        {0xcd7780b7, 0x40d2, 0x4f33, {0x80, 0xe2, 0xb0, 0x2e, 0x00, 0x9c, 0xe6, 0x3f}}
-    },
-    {
-        "SpoutCam2",
-        {0x8e14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x34}},
-        {0xcd7780b7, 0x40d2, 0x4f33, {0x80, 0xe2, 0xb0, 0x2e, 0x00, 0x9c, 0xe6, 0x40}}
-    },
-    {
-        "SpoutCam3",
-        {0x8e14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x35}},
-        {0xcd7780b7, 0x40d2, 0x4f33, {0x80, 0xe2, 0xb0, 0x2e, 0x00, 0x9c, 0xe6, 0x41}}
-    },
-    {
-        "SpoutCam4",
-        {0x8e14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x36}},
-        {0xcd7780b7, 0x40d2, 0x4f33, {0x80, 0xe2, 0xb0, 0x2e, 0x00, 0x9c, 0xe6, 0x42}}
-    },
-    {
-        "SpoutCam5",
-        {0x8e14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x37}},
-        {0xcd7780b7, 0x40d2, 0x4f33, {0x80, 0xe2, 0xb0, 0x2e, 0x00, 0x9c, 0xe6, 0x43}}
-    },
-    {
-        "SpoutCam6",
-        {0x8e14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x38}},
-        {0xcd7780b7, 0x40d2, 0x4f33, {0x80, 0xe2, 0xb0, 0x2e, 0x00, 0x9c, 0xe6, 0x44}}
-    },
-    {
-        "SpoutCam7",
-        {0x8e14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x39}},
-        {0xcd7780b7, 0x40d2, 0x4f33, {0x80, 0xe2, 0xb0, 0x2e, 0x00, 0x9c, 0xe6, 0x45}}
-    },
-    {
-        "SpoutCam8",
-        {0x8e14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x3a}},
-        {0xcd7780b7, 0x40d2, 0x4f33, {0x80, 0xe2, 0xb0, 0x2e, 0x00, 0x9c, 0xe6, 0x46}}
-    }
-};
 
 // Timer ID for auto-refresh
 #define TIMER_AUTO_REFRESH 1001
@@ -107,12 +48,11 @@ void PopulateCameraList(HWND hListView);
 void ScanDynamicCameras();
 void RefreshCameraList(HWND hListView);
 void AutoRefreshCameraList(HWND hListView);
-bool RegisterCamera(const DynamicCamera& camera);
-bool UnregisterCamera(const DynamicCamera& camera);
-void OpenCameraProperties(const DynamicCamera& camera);
+bool RegisterCameraByName(const std::string& cameraName);
+bool UnregisterCameraByName(const std::string& cameraName);
+void OpenCameraPropertiesByName(const std::string& cameraName);
 bool CreateNewCamera(const char* name);
-bool RemoveCamera(const DynamicCamera& camera);
-int FindAvailableSlot();
+bool RemoveCameraByName(const std::string& cameraName);
 bool RegisterLegacyCamera(int cameraIndex);
 bool UnregisterLegacyCamera(int cameraIndex);  
 void OpenLegacyCameraProperties(int cameraIndex);
@@ -147,7 +87,6 @@ typedef BOOL (STDAPICALLTYPE *GetSpoutCameraNameFunc)(int cameraIndex, char* nam
 
 HINSTANCE g_hInst;
 
-#define MAX_CAMERAS 32  // Increased limit for dynamic cameras
 
 // Optimized function to scan registered DirectShow video capture filters
 void ScanRegisteredFilters()
@@ -320,111 +259,16 @@ void ScanDynamicCameras()
         return; // Use cached results
     }
     
-    g_dynamicCameras.clear();
+    // Use DynamicCameraManager to get all cameras
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    auto cameras = manager->GetAllCameras();
     
-    const char* camerasPath = "Software\\Leading Edge\\SpoutCam\\Cameras";
-    HKEY camerasKey;
+    LOG("Found %d dynamic cameras\n", (int)cameras.size());
     
-    LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, camerasPath, 0, KEY_READ, &camerasKey);
-    if (result != ERROR_SUCCESS) {
-        // No cameras registered yet - this is normal
-        g_camerasScanned = true;
-        return;
-    }
-    
-    DWORD subkeyCount = 0;
-    DWORD maxSubkeyLen = 0;
-    result = RegQueryInfoKeyA(camerasKey, nullptr, nullptr, nullptr, &subkeyCount, &maxSubkeyLen, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
-    
-    if (result == ERROR_SUCCESS) {
-        char* subkeyName = new char[maxSubkeyLen + 1];
-        
-        for (DWORD i = 0; i < subkeyCount; i++) {
-            DWORD subkeyNameLen = maxSubkeyLen + 1;
-            if (RegEnumKeyExA(camerasKey, i, subkeyName, &subkeyNameLen, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-                DynamicCamera camera;
-                camera.name = subkeyName;
-                
-                char cameraPath[512];
-                sprintf_s(cameraPath, "%s\\%s", camerasPath, subkeyName);
-                
-                // Read slot index from registry
-                char slotStr[16];
-                if (ReadStringFromRegistry(HKEY_CURRENT_USER, cameraPath, "slotIndex", slotStr, sizeof(slotStr))) {
-                    camera.slotIndex = atoi(slotStr);
-                    
-                    // Validate slot index and use corresponding GUIDs
-                    if (camera.slotIndex >= 0 && camera.slotIndex < MAX_DYNAMIC_CAMERAS) {
-                        camera.clsid = g_StaticCameraConfigs[camera.slotIndex].clsid;
-                        camera.propPageClsid = g_StaticCameraConfigs[camera.slotIndex].propPageClsid;
-                    } else {
-                        LOG("Invalid slot index %d for camera '%s', using slot 0\n", camera.slotIndex, subkeyName);
-                        camera.slotIndex = 0;
-                        camera.clsid = g_StaticCameraConfigs[0].clsid;
-                        camera.propPageClsid = g_StaticCameraConfigs[0].propPageClsid;
-                    }
-                } else {
-                    // No slot index found, assign available slot
-                    camera.slotIndex = FindAvailableSlot();
-                    if (camera.slotIndex == -1) {
-                        camera.slotIndex = 0; // Fallback to slot 0
-                    }
-                    camera.clsid = g_StaticCameraConfigs[camera.slotIndex].clsid;
-                    camera.propPageClsid = g_StaticCameraConfigs[camera.slotIndex].propPageClsid;
-                    
-                    // Save the slot index for next time
-                    char slotStr[16];
-                    sprintf_s(slotStr, "%d", camera.slotIndex);
-                    WriteStringToRegistry(HKEY_CURRENT_USER, cameraPath, "slotIndex", slotStr);
-                }
-                
-                // Check if camera is registered using the actual name from the DLL
-                camera.isRegistered = IsCameraRegistered(camera.slotIndex);
-                
-                // Check if camera has settings using the legacy registry path
-                char legacyPath[256];
-                if (camera.slotIndex == 0) {
-                    strcpy_s(legacyPath, "Software\\Leading Edge\\SpoutCam");
-                } else {
-                    sprintf_s(legacyPath, "Software\\Leading Edge\\SpoutCam%d", camera.slotIndex + 1);
-                }
-                
-                DWORD testValue;
-                camera.hasSettings = ReadDwordFromRegistry(HKEY_CURRENT_USER, legacyPath, "fps", &testValue) ||
-                                   ReadDwordFromRegistry(HKEY_CURRENT_USER, legacyPath, "resolution", &testValue) ||
-                                   ReadDwordFromRegistry(HKEY_CURRENT_USER, legacyPath, "mirror", &testValue);
-                
-                g_dynamicCameras.push_back(camera);
-            }
-        }
-        delete[] subkeyName;
-    }
-    
-    RegCloseKey(camerasKey);
     g_camerasScanned = true;
 }
 
-// Find an available slot for a new camera
-int FindAvailableSlot()
-{
-    bool usedSlots[MAX_DYNAMIC_CAMERAS] = {false};
-    
-    // Mark slots that are already in use
-    for (const auto& camera : g_dynamicCameras) {
-        if (camera.slotIndex >= 0 && camera.slotIndex < MAX_DYNAMIC_CAMERAS) {
-            usedSlots[camera.slotIndex] = true;
-        }
-    }
-    
-    // Find first available slot
-    for (int i = 0; i < MAX_DYNAMIC_CAMERAS; i++) {
-        if (!usedSlots[i]) {
-            return i;
-        }
-    }
-    
-    return -1; // No slots available
-}
+// No longer needed - using fully dynamic system
 
 // Enhanced camera creation with detailed error reporting
 CameraCreationResult CreateNewCameraEx(const char* name)
@@ -435,52 +279,27 @@ CameraCreationResult CreateNewCameraEx(const char* name)
         return CAMERA_CREATE_INVALID_NAME;
     }
     
+    // Use DynamicCameraManager to create camera
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    
     // Check if name already exists
-    for (const auto& camera : g_dynamicCameras) {
-        if (camera.name == name) {
-            LOG("Camera name '%s' already exists\n", name);
-            return CAMERA_CREATE_NAME_EXISTS;
-        }
+    if (manager->GetCamera(name) != nullptr) {
+        LOG("Camera name '%s' already exists\n", name);
+        return CAMERA_CREATE_NAME_EXISTS;
     }
     
-    // Find available slot
-    int availableSlot = FindAvailableSlot();
-    if (availableSlot == -1) {
-        LOG("No available slots for new camera (maximum %d cameras supported)\n", MAX_DYNAMIC_CAMERAS);
-        return CAMERA_CREATE_MAX_REACHED;
-    }
-    
-    // Create new camera entry using existing DLL slot
-    DynamicCamera newCamera;
-    newCamera.name = name;
-    newCamera.slotIndex = availableSlot;
-    newCamera.clsid = g_StaticCameraConfigs[availableSlot].clsid;
-    newCamera.propPageClsid = g_StaticCameraConfigs[availableSlot].propPageClsid;
-    newCamera.isRegistered = false;
-    newCamera.hasSettings = false;
-    
-    // Save to registry
-    char cameraPath[512];
-    sprintf_s(cameraPath, "Software\\Leading Edge\\SpoutCam\\Cameras\\%s", name);
-    
-    // Store the camera info
-    if (!WriteStringToRegistry(HKEY_CURRENT_USER, cameraPath, "name", name)) {
-        LOG("Failed to write camera name to registry\n");
+    // Create new camera
+    auto camera = manager->CreateCamera(name);
+    if (!camera) {
+        LOG("Failed to create camera '%s'\n", name);
         return CAMERA_CREATE_REGISTRY_ERROR;
     }
     
-    // Store the slot index
-    char slotStr[16];
-    sprintf_s(slotStr, "%d", availableSlot);
-    if (!WriteStringToRegistry(HKEY_CURRENT_USER, cameraPath, "slotIndex", slotStr)) {
-        LOG("Failed to write slot index to registry\n");
-        return CAMERA_CREATE_REGISTRY_ERROR;
-    }
+    LOG("Created new camera '%s'\n", name);
     
-    // Add to cache
-    g_dynamicCameras.push_back(newCamera);
+    // Clear cache to refresh
+    g_camerasScanned = false;
     
-    LOG("Created new camera '%s' using slot %d\n", name, availableSlot);
     return CAMERA_CREATE_SUCCESS;
 }
 
@@ -490,29 +309,35 @@ bool CreateNewCamera(const char* name)
     return CreateNewCameraEx(name) == CAMERA_CREATE_SUCCESS;
 }
 
-// Remove a camera and its configuration
-bool RemoveCamera(const DynamicCamera& camera)
+// Remove a camera and its configuration using dynamic system
+bool RemoveCameraByName(const std::string& cameraName)
 {
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    auto camera = manager->GetCamera(cameraName);
+    
+    if (!camera) {
+        LOG("Camera '%s' not found\n", cameraName.c_str());
+        return false;
+    }
+    
     // First unregister if registered
-    if (camera.isRegistered) {
-        if (!UnregisterCamera(camera)) {
-            LOG("Failed to unregister camera '%s' before removal\n", camera.name.c_str());
+    if (camera->isRegistered) {
+        if (!UnregisterCameraByName(cameraName)) {
+            LOG("Failed to unregister camera '%s' before removal\n", cameraName.c_str());
             // Continue anyway to clean up registry
         }
     }
     
-    // Delete registry configuration
-    DeleteCameraConfiguration(camera.name.c_str());
-    
-    // Remove from cache
-    auto it = std::find_if(g_dynamicCameras.begin(), g_dynamicCameras.end(),
-                          [&camera](const DynamicCamera& c) { return c.name == camera.name; });
-    if (it != g_dynamicCameras.end()) {
-        g_dynamicCameras.erase(it);
+    // Delete from dynamic manager
+    if (manager->DeleteCamera(cameraName)) {
+        LOG("Removed camera '%s'\n", cameraName.c_str());
+        // Clear cache to refresh
+        g_camerasScanned = false;
+        return true;
+    } else {
+        LOG("Failed to remove camera '%s'\n", cameraName.c_str());
+        return false;
     }
-    
-    LOG("Removed camera '%s'\n", camera.name.c_str());
-    return true;
 }
 
 bool IsCameraRegistered(int cameraIndex)
@@ -591,44 +416,11 @@ bool HasCameraSettings(int cameraIndex)
     return (hasFps || hasResolution || hasMirror);
 }
 
-// Generate the next available default camera name (SpoutCam, SpoutCam2, SpoutCam3, etc.)
+// Generate the next available default camera name using dynamic system
 std::string GenerateDefaultCameraName()
 {
-    // Start with "SpoutCam" (number 1, but no suffix)
-    std::string candidateName = "SpoutCam";
-    
-    // Check if "SpoutCam" is available
-    bool nameExists = false;
-    for (const auto& camera : g_dynamicCameras) {
-        if (camera.name == candidateName) {
-            nameExists = true;
-            break;
-        }
-    }
-    
-    if (!nameExists) {
-        return candidateName;
-    }
-    
-    // Try SpoutCam2, SpoutCam3, SpoutCam4, etc.
-    for (int i = 2; i <= MAX_DYNAMIC_CAMERAS + 10; i++) { // Check a bit beyond max cameras
-        candidateName = "SpoutCam" + std::to_string(i);
-        
-        nameExists = false;
-        for (const auto& camera : g_dynamicCameras) {
-            if (camera.name == candidateName) {
-                nameExists = true;
-                break;
-            }
-        }
-        
-        if (!nameExists) {
-            return candidateName;
-        }
-    }
-    
-    // Fallback - should rarely happen
-    return "SpoutCam_New";
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    return manager->GenerateAvailableName("SpoutCam");
 }
 
 void RefreshCameraList(HWND hListView)
@@ -638,23 +430,6 @@ void RefreshCameraList(HWND hListView)
     ScanRegisteredFilters();
     ScanDynamicCameras();
     PopulateCameraList(hListView);
-    
-    // Enable/disable the Add New Camera button based on maximum limit
-    HWND hParent = GetParent(hListView);
-    if (hParent) {
-        HWND hAddButton = GetDlgItem(hParent, IDC_ADD_NEW_CAMERA);
-        if (hAddButton) {
-            bool canAddMore = g_dynamicCameras.size() < MAX_DYNAMIC_CAMERAS;
-            EnableWindow(hAddButton, canAddMore ? TRUE : FALSE);
-            
-            // Update button text to indicate limit
-            if (canAddMore) {
-                SetWindowTextA(hAddButton, "Add New Camera");
-            } else {
-                SetWindowTextA(hAddButton, "Add New Camera (Max 8)");
-            }
-        }
-    }
 }
 
 // Lighter auto-refresh that only updates if there are actual changes
@@ -662,54 +437,48 @@ void AutoRefreshCameraList(HWND hListView)
 {
     // Store current camera count and registration states to detect changes
     static size_t lastCameraCount = 0;
-    static std::vector<bool> lastRegistrationStates;
+    static std::vector<std::pair<std::string, bool>> lastCameraStates;
     
     // Rescan data (but reuse cache where possible)
     ScanRegisteredFilters();
     ScanDynamicCameras();
     
+    // Get current cameras from dynamic manager
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    auto cameras = manager->GetAllCameras();
+    
     // Check if anything changed
     bool needsUpdate = false;
     
     // Check camera count change
-    if (g_dynamicCameras.size() != lastCameraCount) {
+    if (cameras.size() != lastCameraCount) {
         needsUpdate = true;
-        lastCameraCount = g_dynamicCameras.size();
+        lastCameraCount = cameras.size();
     }
     
-    // Check registration state changes
-    if (lastRegistrationStates.size() != g_dynamicCameras.size()) {
-        lastRegistrationStates.resize(g_dynamicCameras.size());
+    // Check for changes in camera names or registration states
+    if (lastCameraStates.size() != cameras.size()) {
         needsUpdate = true;
-    }
-    
-    for (size_t i = 0; i < g_dynamicCameras.size(); i++) {
-        if (i >= lastRegistrationStates.size() || lastRegistrationStates[i] != g_dynamicCameras[i].isRegistered) {
-            lastRegistrationStates[i] = g_dynamicCameras[i].isRegistered;
-            needsUpdate = true;
-        }
-    }
-    
-    // Only update UI if something actually changed
-    if (needsUpdate) {
-        LOG("Camera state changed, updating list display\n");
-        PopulateCameraList(hListView);
-        
-        // Update button state
-        HWND hParent = GetParent(hListView);
-        if (hParent) {
-            HWND hAddButton = GetDlgItem(hParent, IDC_ADD_NEW_CAMERA);
-            if (hAddButton) {
-                bool canAddMore = g_dynamicCameras.size() < MAX_DYNAMIC_CAMERAS;
-                EnableWindow(hAddButton, canAddMore ? TRUE : FALSE);
-                
-                if (canAddMore) {
-                    SetWindowTextA(hAddButton, "Add New Camera");
-                } else {
-                    SetWindowTextA(hAddButton, "Add New Camera (Max 8)");
-                }
+    } else {
+        for (size_t i = 0; i < cameras.size(); i++) {
+            if (i >= lastCameraStates.size() || 
+                lastCameraStates[i].first != cameras[i]->name || 
+                lastCameraStates[i].second != cameras[i]->isRegistered) {
+                needsUpdate = true;
+                break;
             }
         }
+    }
+    
+    // Update cached state
+    if (needsUpdate) {
+        lastCameraStates.clear();
+        for (const auto& camera : cameras) {
+            lastCameraStates.push_back({camera->name, camera->isRegistered});
+        }
+        
+        LOG("Camera state changed, updating list display\n");
+        PopulateCameraList(hListView);
     }
 }
 
@@ -722,28 +491,32 @@ void PopulateCameraList(HWND hListView)
     // Clear existing items
     ListView_DeleteAllItems(hListView);
     
+    // Get cameras from dynamic manager
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    auto cameras = manager->GetAllCameras();
+    
     // Add each dynamic camera to the list
-    for (size_t i = 0; i < g_dynamicCameras.size(); i++) {
-        const auto& camera = g_dynamicCameras[i];
+    for (size_t i = 0; i < cameras.size(); i++) {
+        const auto& camera = cameras[i];
         
         LVITEM lvi = {0};
         lvi.mask = LVIF_TEXT | LVIF_PARAM;
         lvi.iItem = (int)i;
         lvi.iSubItem = 0;
         lvi.lParam = (LPARAM)i; // Store camera index in item data
-        lvi.pszText = (LPSTR)camera.name.c_str();
+        lvi.pszText = (LPSTR)camera->name.c_str();
         
         int itemIndex = ListView_InsertItem(hListView, &lvi);
         
         // Set registration status
-        ListView_SetItemText(hListView, itemIndex, 1, (LPSTR)(camera.isRegistered ? "Registered" : "Not Registered"));
+        ListView_SetItemText(hListView, itemIndex, 1, (LPSTR)(camera->isRegistered ? "Registered" : "Not Registered"));
         
         // Set configuration status
-        ListView_SetItemText(hListView, itemIndex, 2, (LPSTR)(camera.hasSettings ? "Configured" : "Default"));
+        ListView_SetItemText(hListView, itemIndex, 2, (LPSTR)"Default");
     }
     
     // If no cameras exist, show a helpful message
-    if (g_dynamicCameras.empty()) {
+    if (cameras.empty()) {
         LVITEM lvi = {0};
         lvi.mask = LVIF_TEXT;
         lvi.iItem = 0;
@@ -756,28 +529,69 @@ void PopulateCameraList(HWND hListView)
     }
 }
 
-// New dynamic camera registration function - maps to existing DLL slots
-bool RegisterCamera(const DynamicCamera& camera)
+// New dynamic camera registration function
+bool RegisterCameraByName(const std::string& cameraName)
 {
-    LOG("Registering dynamic camera '%s' using slot %d\n", camera.name.c_str(), camera.slotIndex);
+    LOG("Registering dynamic camera '%s'\n", cameraName.c_str());
     
-    // Use the existing legacy registration system with the camera's slot
-    bool success = RegisterLegacyCamera(camera.slotIndex);
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    auto camera = manager->GetCamera(cameraName);
     
+    if (!camera) {
+        LOG("Camera '%s' not found\n", cameraName.c_str());
+        return false;
+    }
+    
+    // Use the DLL registration system
+    wchar_t dllPath[MAX_PATH];
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+    if (lastSlash) *lastSlash = L'\0';
+    
+#ifdef _WIN64
+    const wchar_t* subDir = L"SpoutCam64";
+    const wchar_t* dllName = L"SpoutCam64.ax";
+#else
+    const wchar_t* subDir = L"SpoutCam32";
+    const wchar_t* dllName = L"SpoutCam32.ax";
+#endif
+    
+    swprintf_s(dllPath, MAX_PATH, L"%s\\%s\\%s", exePath, subDir, dllName);
+    
+    LOG("Loading SpoutCam DLL: %ls\n", dllPath);
+    
+    HMODULE hDll = LoadLibraryW(dllPath);
+    if (!hDll) {
+        LOG("Failed to load DLL: %ls\n", dllPath);
+        return false;
+    }
+    
+    // Get the DLL registration function
+    typedef HRESULT (STDAPICALLTYPE *DllRegisterServerFunc)();
+    DllRegisterServerFunc registerFunc = 
+        (DllRegisterServerFunc)GetProcAddress(hDll, "DllRegisterServer");
+    
+    HRESULT hr = E_FAIL;
+    if (registerFunc) {
+        hr = registerFunc();
+    }
+    
+    FreeLibrary(hDll);
+    
+    bool success = SUCCEEDED(hr);
     if (success) {
-        // Mark as registered in cache
-        auto it = std::find_if(g_dynamicCameras.begin(), g_dynamicCameras.end(),
-                              [&camera](DynamicCamera& c) { return c.name == camera.name; });
-        if (it != g_dynamicCameras.end()) {
-            it->isRegistered = true;
-        }
-        LOG("Dynamic camera '%s' registered successfully using slot %d\n", camera.name.c_str(), camera.slotIndex);
+        manager->SetCameraRegistered(cameraName, true);
+        LOG("Registration result: 0x%08X (SUCCESS)\n", hr);
+        LOG("Dynamic camera '%s' registered successfully\n", cameraName.c_str());
     } else {
-        LOG("Failed to register dynamic camera '%s' using slot %d\n", camera.name.c_str(), camera.slotIndex);
+        LOG("Registration result: 0x%08X (FAILED)\n", hr);
+        LOG("Failed to register dynamic camera '%s'\n", cameraName.c_str());
     }
     
     return success;
 }
+
 
 // Legacy camera registration function (kept for compatibility)
 bool RegisterLegacyCamera(int cameraIndex)
@@ -824,28 +638,65 @@ bool RegisterLegacyCamera(int cameraIndex)
     return SUCCEEDED(hr);
 }
 
-// New dynamic camera unregistration function - maps to existing DLL slots
-bool UnregisterCamera(const DynamicCamera& camera)
+// New dynamic camera unregistration function
+bool UnregisterCameraByName(const std::string& cameraName)
 {
-    LOG("Unregistering dynamic camera '%s' using slot %d\n", camera.name.c_str(), camera.slotIndex);
+    LOG("Unregistering dynamic camera '%s'\n", cameraName.c_str());
     
-    // Use the existing legacy unregistration system with the camera's slot
-    bool success = UnregisterLegacyCamera(camera.slotIndex);
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    auto camera = manager->GetCamera(cameraName);
     
+    if (!camera) {
+        LOG("Camera '%s' not found\n", cameraName.c_str());
+        return false;
+    }
+    
+    // Use the DLL unregistration system
+    wchar_t dllPath[MAX_PATH];
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+    if (lastSlash) *lastSlash = L'\0';
+    
+#ifdef _WIN64
+    const wchar_t* subDir = L"SpoutCam64";
+    const wchar_t* dllName = L"SpoutCam64.ax";
+#else
+    const wchar_t* subDir = L"SpoutCam32";
+    const wchar_t* dllName = L"SpoutCam32.ax";
+#endif
+    
+    swprintf_s(dllPath, MAX_PATH, L"%s\\%s\\%s", exePath, subDir, dllName);
+    
+    HMODULE hDll = LoadLibraryW(dllPath);
+    if (!hDll) {
+        LOG("Failed to load DLL for unregistration\n");
+        return false;
+    }
+    
+    // Get the DLL unregistration function
+    typedef HRESULT (STDAPICALLTYPE *DllUnregisterServerFunc)();
+    DllUnregisterServerFunc unregisterFunc = 
+        (DllUnregisterServerFunc)GetProcAddress(hDll, "DllUnregisterServer");
+    
+    HRESULT hr = E_FAIL;
+    if (unregisterFunc) {
+        hr = unregisterFunc();
+    }
+    
+    FreeLibrary(hDll);
+    
+    bool success = SUCCEEDED(hr);
     if (success) {
-        // Mark as unregistered in cache
-        auto it = std::find_if(g_dynamicCameras.begin(), g_dynamicCameras.end(),
-                              [&camera](DynamicCamera& c) { return c.name == camera.name; });
-        if (it != g_dynamicCameras.end()) {
-            it->isRegistered = false;
-        }
-        LOG("Dynamic camera '%s' unregistered successfully using slot %d\n", camera.name.c_str(), camera.slotIndex);
+        manager->SetCameraRegistered(cameraName, false);
+        LOG("Dynamic camera '%s' unregistered successfully\n", cameraName.c_str());
     } else {
-        LOG("Failed to unregister dynamic camera '%s' using slot %d\n", camera.name.c_str(), camera.slotIndex);
+        LOG("Failed to unregister dynamic camera '%s'\n", cameraName.c_str());
     }
     
     return success;
 }
+
 
 // Legacy camera unregistration function (kept for compatibility)
 bool UnregisterLegacyCamera(int cameraIndex)
@@ -891,10 +742,10 @@ bool UnregisterLegacyCamera(int cameraIndex)
     return SUCCEEDED(hr);
 }
 
-// New dynamic camera properties function
-void OpenCameraProperties(const DynamicCamera& camera)
+// Open camera properties using dynamic system
+void OpenCameraPropertiesByName(const std::string& cameraName)
 {
-    LOG("Opening properties for dynamic camera '%s' using slot %d\n", camera.name.c_str(), camera.slotIndex);
+    LOG("Opening properties for dynamic camera '%s'\n", cameraName.c_str());
     
     // Detect process architecture
 #ifdef _WIN64
@@ -914,33 +765,28 @@ void OpenCameraProperties(const DynamicCamera& camera)
     
     swprintf_s(cmdPath, MAX_PATH, L"%s\\%s\\SpoutCamProperties.cmd", exePath, subDir);
     
-    // Store the camera index and name in registry for the properties dialog to use
+    // Store the camera name in registry for the properties dialog to use
     HKEY hKey;
     LONG result = RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", 0, NULL, 
                                   REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, NULL);
     
     if (result == ERROR_SUCCESS) {
-        DWORD dwIndex = (DWORD)camera.slotIndex;
-        RegSetValueExA(hKey, "SelectedCameraIndex", 0, REG_DWORD, (BYTE*)&dwIndex, sizeof(DWORD));
-        RegSetValueExA(hKey, "SelectedCameraName", 0, REG_SZ, (BYTE*)camera.name.c_str(), (DWORD)camera.name.length() + 1);
+        RegSetValueExA(hKey, "SelectedCameraName", 0, REG_SZ, (BYTE*)cameraName.c_str(), (DWORD)cameraName.length() + 1);
         RegCloseKey(hKey);
-        LOG("Stored camera index %d and name '%s' in registry\n", camera.slotIndex, camera.name.c_str());
+        LOG("Stored camera name '%s' in registry\n", cameraName.c_str());
     } else {
-        LOG("Failed to store camera info in registry, falling back to legacy method\n");
-        // Fallback to legacy method
-        OpenLegacyCameraProperties(camera.slotIndex);
-        return;
+        LOG("Failed to store camera info in registry\n");
     }
     
-    wchar_t parameters[64];
-    swprintf_s(parameters, 64, L"%d", camera.slotIndex);
+    // Use camera name as parameter
+    std::wstring wCameraName(cameraName.begin(), cameraName.end());
     
     SHELLEXECUTEINFOW sei = {0};
     sei.cbSize = sizeof(SHELLEXECUTEINFOW);
     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
     sei.lpVerb = L"runas";
     sei.lpFile = cmdPath;
-    sei.lpParameters = parameters;
+    sei.lpParameters = wCameraName.c_str();
     sei.nShow = SW_SHOW;
     
     if (!ShellExecuteExW(&sei)) {
@@ -1164,16 +1010,6 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                 switch (wmId) {
                     case IDC_ADD_NEW_CAMERA:
                         {
-                            // Check if maximum cameras reached
-                            if (g_dynamicCameras.size() >= MAX_DYNAMIC_CAMERAS) {
-                                MessageBox(hDlg, 
-                                    "Maximum number of cameras (8) has been reached.\n\n"
-                                    "To add a new camera, please remove an existing camera first.",
-                                    "Maximum Cameras Reached", 
-                                    MB_OK | MB_ICONINFORMATION);
-                                break;
-                            }
-                            
                             // Generate default camera name and create camera directly
                             std::string defaultName = GenerateDefaultCameraName();
                             CameraCreationResult result = CreateNewCameraEx(defaultName.c_str());
@@ -1183,14 +1019,16 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                 RefreshCameraList(hListView);
                                 LOG("New camera '%s' added successfully\n", defaultName.c_str());
                                 
-                                // Find the newly created camera and open its properties
-                                for (size_t i = 0; i < g_dynamicCameras.size(); i++) {
-                                    if (g_dynamicCameras[i].name == defaultName) {
+                                // Get cameras and find the newly created one
+                                auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+                                auto cameras = manager->GetAllCameras();
+                                for (size_t i = 0; i < cameras.size(); i++) {
+                                    if (cameras[i]->name == defaultName) {
                                         // Select the new camera in the list
                                         ListView_SetItemState(hListView, (int)i, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
                                         
                                         // Open its properties dialog
-                                        OpenCameraProperties(g_dynamicCameras[i]);
+                                        OpenCameraPropertiesByName(defaultName);
                                         break;
                                     }
                                 }
@@ -1200,10 +1038,6 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                 const char* errorTitle;
                                 
                                 switch (result) {
-                                    case CAMERA_CREATE_MAX_REACHED:
-                                        errorMessage = "Maximum number of cameras (8) has been reached.";
-                                        errorTitle = "Maximum Cameras Reached";
-                                        break;
                                     case CAMERA_CREATE_REGISTRY_ERROR:
                                         errorMessage = "Failed to save camera configuration to registry.";
                                         errorTitle = "Registry Error";
@@ -1223,13 +1057,16 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                     case IDC_REGISTER_CAMERA:
                         {
                             int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
-                            if (selected != -1 && selected < (int)g_dynamicCameras.size()) {
-                                const auto& camera = g_dynamicCameras[selected];
-                                if (RegisterCamera(camera)) {
+                            auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+                            auto cameras = manager->GetAllCameras();
+                            
+                            if (selected != -1 && selected < (int)cameras.size()) {
+                                const std::string& cameraName = cameras[selected]->name;
+                                if (RegisterCameraByName(cameraName)) {
                                     RefreshCameraList(hListView);
-                                    LOG("Camera '%s' registered successfully\n", camera.name.c_str());
+                                    LOG("Camera '%s' registered successfully\n", cameraName.c_str());
                                 } else {
-                                    LOG("Failed to register camera '%s'\n", camera.name.c_str());
+                                    LOG("Failed to register camera '%s'\n", cameraName.c_str());
                                 }
                             } else {
                                 MessageBox(hDlg, "Please select a camera to register.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
@@ -1240,13 +1077,16 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                     case IDC_UNREGISTER_CAMERA:
                         {
                             int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
-                            if (selected != -1 && selected < (int)g_dynamicCameras.size()) {
-                                const auto& camera = g_dynamicCameras[selected];
-                                if (UnregisterCamera(camera)) {
+                            auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+                            auto cameras = manager->GetAllCameras();
+                            
+                            if (selected != -1 && selected < (int)cameras.size()) {
+                                const std::string& cameraName = cameras[selected]->name;
+                                if (UnregisterCameraByName(cameraName)) {
                                     RefreshCameraList(hListView);
-                                    LOG("Camera '%s' unregistered successfully\n", camera.name.c_str());
+                                    LOG("Camera '%s' unregistered successfully\n", cameraName.c_str());
                                 } else {
-                                    LOG("Failed to unregister camera '%s'\n", camera.name.c_str());
+                                    LOG("Failed to unregister camera '%s'\n", cameraName.c_str());
                                 }
                             } else {
                                 MessageBox(hDlg, "Please select a camera to unregister.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
@@ -1257,37 +1097,40 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                     case IDC_REREGISTER_CAMERA:
                         {
                             int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
-                            if (selected != -1 && selected < (int)g_dynamicCameras.size()) {
-                                const auto& camera = g_dynamicCameras[selected];
+                            auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+                            auto cameras = manager->GetAllCameras();
+                            
+                            if (selected != -1 && selected < (int)cameras.size()) {
+                                const std::string& cameraName = cameras[selected]->name;
                                 
-                                LOG("Reregistering camera '%s' using slot %d\n", camera.name.c_str(), camera.slotIndex);
+                                LOG("Reregistering camera '%s'\n", cameraName.c_str());
                                 
                                 // First unregister
-                                bool unregisterSuccess = UnregisterCamera(camera);
+                                bool unregisterSuccess = UnregisterCameraByName(cameraName);
                                 
                                 // Brief pause to ensure unregistration is complete
                                 Sleep(500);
                                 
                                 // Then register again
-                                bool registerSuccess = RegisterCamera(camera);
+                                bool registerSuccess = RegisterCameraByName(cameraName);
                                 
                                 if (unregisterSuccess && registerSuccess) {
                                     RefreshCameraList(hListView);
-                                    LOG("Camera '%s' reregistered successfully\n", camera.name.c_str());
+                                    LOG("Camera '%s' reregistered successfully\n", cameraName.c_str());
                                     
                                     // Show success message
                                     char successMsg[256];
-                                    sprintf_s(successMsg, "Camera '%s' has been successfully reregistered.\n\nThe camera is now ready to use in video applications.", camera.name.c_str());
+                                    sprintf_s(successMsg, "Camera '%s' has been successfully reregistered.\n\nThe camera is now ready to use in video applications.", cameraName.c_str());
                                     MessageBox(hDlg, successMsg, "Reregistration Complete", MB_OK | MB_ICONINFORMATION);
                                 } else {
                                     RefreshCameraList(hListView);
                                     LOG("Failed to reregister camera '%s' (unregister: %s, register: %s)\n", 
-                                        camera.name.c_str(), 
+                                        cameraName.c_str(), 
                                         unregisterSuccess ? "success" : "failed",
                                         registerSuccess ? "success" : "failed");
                                     
                                     char errorMsg[256];
-                                    sprintf_s(errorMsg, "Failed to reregister camera '%s'.\n\nCheck the debug console for details.", camera.name.c_str());
+                                    sprintf_s(errorMsg, "Failed to reregister camera '%s'.\n\nCheck the debug console for details.", cameraName.c_str());
                                     MessageBox(hDlg, errorMsg, "Reregistration Failed", MB_OK | MB_ICONERROR);
                                 }
                             } else {
@@ -1299,19 +1142,22 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                     case IDC_REMOVE_CAMERA:
                         {
                             int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
-                            if (selected != -1 && selected < (int)g_dynamicCameras.size()) {
-                                const auto& camera = g_dynamicCameras[selected];
+                            auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+                            auto cameras = manager->GetAllCameras();
+                            
+                            if (selected != -1 && selected < (int)cameras.size()) {
+                                const std::string& cameraName = cameras[selected]->name;
                                 
                                 char confirmMsg[512];
-                                sprintf_s(confirmMsg, "Are you sure you want to remove camera '%s'?\n\nThis will permanently delete the camera and all its settings.", camera.name.c_str());
+                                sprintf_s(confirmMsg, "Are you sure you want to remove camera '%s'?\n\nThis will permanently delete the camera and all its settings.", cameraName.c_str());
                                 
                                 int result = MessageBox(hDlg, confirmMsg, "Confirm Removal", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
                                 if (result == IDYES) {
-                                    if (RemoveCamera(camera)) {
+                                    if (RemoveCameraByName(cameraName)) {
                                         RefreshCameraList(hListView);
-                                        LOG("Camera '%s' removed successfully\n", camera.name.c_str());
+                                        LOG("Camera '%s' removed successfully\n", cameraName.c_str());
                                     } else {
-                                        LOG("Failed to remove camera '%s'\n", camera.name.c_str());
+                                        LOG("Failed to remove camera '%s'\n", cameraName.c_str());
                                     }
                                 }
                             } else {
@@ -1341,7 +1187,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                 int configDeletedCount = 0;
                                 
                                 // Unregister all 8 cameras and delete their configurations
-                                for (int i = 0; i < MAX_CAMERAS; i++) {
+                                for (int i = 0; i < 8; i++) {
                                     LOG("Cleaning up SpoutCam%d...\n", i + 1);
                                     
                                     // Unregister the camera
@@ -1388,9 +1234,12 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                     case IDC_CONFIGURE_CAMERA:
                         {
                             int selected = ListView_GetNextItem(hListView, -1, LVNI_SELECTED);
-                            if (selected != -1 && selected < (int)g_dynamicCameras.size()) {
-                                const auto& camera = g_dynamicCameras[selected];
-                                OpenCameraProperties(camera);
+                            auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+                            auto cameras = manager->GetAllCameras();
+                            
+                            if (selected != -1 && selected < (int)cameras.size()) {
+                                const std::string& cameraName = cameras[selected]->name;
+                                OpenCameraPropertiesByName(cameraName);
                             } else if (selected == -1) {
                                 MessageBox(hDlg, "Please select a camera to configure.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
                             } else {
