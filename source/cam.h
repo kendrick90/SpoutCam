@@ -74,6 +74,9 @@ extern "C" {
 
 EXTERN_C const GUID CLSID_SpoutCamPropertyPage;
 EXTERN_C const GUID IID_ICamSettings;
+// Primary CLSIDs for single registration approach
+EXTERN_C const GUID CLSID_SpoutCam_Primary;
+EXTERN_C const GUID CLSID_SpoutCam_PropPage_Primary;
 //<==================== VS-END ======================>
 
 EXTERN_C const GUID CLSID_SpoutCam;
@@ -121,6 +124,7 @@ private:
 
     CVCam(LPUNKNOWN lpunk, HRESULT *phr);
     CVCam(LPUNKNOWN lpunk, HRESULT *phr, REFCLSID clsid); // Constructor with CLSID
+    CVCam(LPUNKNOWN lpunk, HRESULT *phr, const std::string& cameraName); // Constructor with camera name
 
 /////////////////////////////////////
 // all inherited virtual functions //
@@ -159,6 +163,13 @@ class CVCamStream : public CSourceStream, public IAMStreamConfig, public IKsProp
 private:
     std::string m_cameraName; // Name of which camera this stream belongs to
     char m_registryPath[256]; // Camera-specific registry path
+    
+    // Per-instance resolution and sender settings (instead of globals)
+    unsigned int m_Width;     // Instance-specific image width
+    unsigned int m_Height;    // Instance-specific image height
+    char m_SenderName[256];   // Instance-specific sender name
+    char m_ActiveSender[256]; // Instance-specific active sender name
+    char m_SenderStart[256];  // Instance-specific starting sender name
 
 public:
 
@@ -237,6 +248,13 @@ public:
 	void SetFps(DWORD dwFps);
 	void SetResolution(DWORD dwResolution);
 	void ReleaseCamReceiver();
+	
+	// Dynamic resolution change support
+	HRESULT HandleResolutionChange(unsigned int newWidth, unsigned int newHeight);
+	bool ShouldCheckResolutionChanges();
+	
+	// Resolution change state tracking (simplified)
+	bool m_bFormatChanged; // Flag to indicate media type changed
 
 	// ============== IPC functions ==============
 	//
@@ -275,6 +293,11 @@ private:
 	DWORD dwLastTime;
     CCritSec m_cSharedState;
     IReferenceClock *m_pClock;
+    
+    // Performance optimization: deferred registry writes
+    bool m_pendingRegistryWrite;
+    char m_pendingSenderName[256];
+    DWORD m_lastRegistryWriteTime;
 
 	///////// jmac ////////
 	LONG GetMediaTypeVersion();

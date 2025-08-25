@@ -65,51 +65,44 @@ if (Test-Path $leadingEdgePath) {
 
 Write-Host "`n=== Phase 2: System CLSID Cleanup ===" -ForegroundColor Cyan
 
-# Search and remove ALL SpoutCam-related CLSIDs
+# Remove specific SpoutCam CLSIDs - now only need to remove the primary CLSID
 $removedClsids = 0
-$clsidPath = "HKLM:\SOFTWARE\Classes\CLSID"
-if (Test-Path $clsidPath) {
-    Write-Host "   Scanning CLSID registry (this may take a moment)..." -ForegroundColor Gray
+$primaryClsids = @(
+    "{8E14549A-DB61-4309-AFA1-3578E927E933}",  # Primary SpoutCam CLSID
+    "{CD7780B7-40D2-4F33-80E2-B02E009CE633}"   # Primary SpoutCam Property Page CLSID
+)
+
+foreach ($clsid in $primaryClsids) {
+    $clsidPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
+    if (Test-Path $clsidPath) {
+        try {
+            $name = (Get-ItemProperty $clsidPath -Name "(default)" -ErrorAction SilentlyContinue)."(default)"
+            Write-Host "   Removing primary CLSID: $clsid = `"$name`"" -ForegroundColor Yellow
+            Remove-Item $clsidPath -Recurse -Force -ErrorAction SilentlyContinue
+            $removedClsids++
+        } catch {
+            Write-Host "   Could not remove CLSID: $clsid" -ForegroundColor Red
+        }
+    }
+}
+
+# Also scan for any remaining SpoutCam DLL references (legacy cleanup)
+$clsidBasePath = "HKLM:\SOFTWARE\Classes\CLSID"
+if (Test-Path $clsidBasePath) {
+    Write-Host "   Scanning for legacy SpoutCam DLL references..." -ForegroundColor Gray
     
-    Get-ChildItem $clsidPath -ErrorAction SilentlyContinue | ForEach-Object {
+    Get-ChildItem $clsidBasePath -ErrorAction SilentlyContinue | ForEach-Object {
         $clsid = $_.PSChildName
         try {
-            # Check default value
-            $defaultValue = (Get-ItemProperty $_.PSPath -Name "(default)" -ErrorAction SilentlyContinue)."(default)"
-            if ($defaultValue -match "SpoutCam|SpoutCam\d+") {
-                Write-Host "   Removing CLSID $clsid = `"$defaultValue`"" -ForegroundColor Yellow
-                Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
-                $removedClsids++
-                return
-            }
-            
-            # Check InprocServer32 path for SpoutCam DLL references
             $inprocPath = Join-Path $_.PSPath "InprocServer32"
             if (Test-Path $inprocPath) {
                 $dllPath = (Get-ItemProperty $inprocPath -Name "(default)" -ErrorAction SilentlyContinue)."(default)"
                 if ($dllPath -match "SpoutCam\d*\.ax") {
-                    Write-Host "   Removing CLSID $clsid (references SpoutCam DLL)" -ForegroundColor Yellow
+                    Write-Host "   Removing legacy CLSID $clsid (references SpoutCam DLL)" -ForegroundColor Yellow
                     Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
                     $removedClsids++
-                    return
                 }
             }
-            
-            # Check for SpoutCam in any subkey values
-            Get-ChildItem $_.PSPath -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-                $properties = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
-                if ($properties) {
-                    $properties.PSObject.Properties | Where-Object { 
-                        $_.Value -is [string] -and $_.Value -match "SpoutCam"
-                    } | ForEach-Object {
-                        Write-Host "   Removing CLSID $clsid (contains SpoutCam reference: $($_.Value))" -ForegroundColor Yellow
-                        Remove-Item $clsidPath\$clsid -Recurse -Force -ErrorAction SilentlyContinue
-                        $removedClsids++
-                        return
-                    }
-                }
-            }
-            
         } catch {
             # Skip entries we can't access
         }

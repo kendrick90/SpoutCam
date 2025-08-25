@@ -30,14 +30,34 @@ for ($i = 2; $i -le 8; $i++) {
 
 Write-Host "`n2. Cleaning up DirectShow registrations (requires admin)..." -ForegroundColor Cyan
 
-# Find and remove SpoutCam CLSIDs
+# Remove specific SpoutCam CLSIDs - now only need to remove the primary CLSID
 $removedClsids = 0
+$primaryClsids = @(
+    "{8E14549A-DB61-4309-AFA1-3578E927E933}",  # Primary SpoutCam CLSID
+    "{CD7780B7-40D2-4F33-80E2-B02E009CE633}"   # Primary SpoutCam Property Page CLSID
+)
+
+foreach ($clsid in $primaryClsids) {
+    $clsidPath = "HKLM:\SOFTWARE\Classes\CLSID\$clsid"
+    if (Test-Path $clsidPath) {
+        try {
+            $name = (Get-ItemProperty $clsidPath -Name "(default)" -ErrorAction SilentlyContinue)."(default)"
+            Write-Host "   Removing primary CLSID: $clsid = `"$name`"" -ForegroundColor Gray
+            Remove-Item $clsidPath -Recurse -Force -ErrorAction SilentlyContinue
+            $removedClsids++
+        } catch {
+            # Skip entries we can't access
+        }
+    }
+}
+
+# Legacy cleanup - scan for any remaining SpoutCam references
 Get-ChildItem "HKLM:\SOFTWARE\Classes\CLSID" -ErrorAction SilentlyContinue | ForEach-Object {
     $clsid = $_.PSChildName
     try {
         $name = (Get-ItemProperty $_.PSPath -Name "(default)" -ErrorAction SilentlyContinue)."(default)"
         if ($name -match "SpoutCam") {
-            Write-Host "   Removing CLSID: $clsid = `"$name`"" -ForegroundColor Gray
+            Write-Host "   Removing legacy CLSID: $clsid = `"$name`"" -ForegroundColor Gray
             Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue
             $removedClsids++
         }

@@ -1,38 +1,51 @@
-# Multiple Virtual Webcams Support
+# Dynamic Virtual Webcam System
 
-SpoutCam now supports creating multiple virtual webcam instances, allowing you to receive from different Spout senders simultaneously.
+SpoutCam now features a **fully dynamic virtual webcam system** with **unlimited cameras** and **custom naming**. No more hard-coded limits or index-based restrictions!
 
-## Configuration
+## Key Features
 
-By default, SpoutCam creates **4 virtual webcams**:
-- **SpoutCam** (original)
-- **SpoutCam2** 
-- **SpoutCam3**
-- **SpoutCam4**
-
-### Changing the Number of Cameras
-
-To change the number of virtual cameras, modify `MAX_SPOUT_CAMERAS` in `source/cam.h`:
-
-```cpp
-#define MAX_SPOUT_CAMERAS 4  // Change this value (1-8 recommended)
-```
+✨ **Unlimited Cameras**: Create as many virtual webcams as needed  
+🏷️ **Custom Names**: Use descriptive names like "OBS Camera", "Zoom Background", "Stream Overlay"  
+⚡ **Dynamic Creation**: Add/remove cameras on-demand through the UI  
+🔄 **No Restart Required**: Changes take effect immediately  
+📝 **Name-Based Management**: All operations use human-readable camera names
 
 ## How It Works
 
-Each virtual webcam:
-1. Has a **unique CLSID** (Class ID) for Windows registration
-2. Uses **separate registry settings** for independent configuration
-3. Can receive from **different Spout senders**
-4. Appears as a separate camera device in applications
+The system automatically:
+1. **Generates unique CLSIDs** for each camera based on its name
+2. **Creates independent registry settings** for each camera
+3. **Manages DirectShow registration** dynamically
+4. **Persists camera configurations** across reboots
 
-## Registry Settings
+## Camera Management
 
-Each camera uses its own registry path:
-- **SpoutCam**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam\SpoutCam`
-- **SpoutCam2**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam\SpoutCam2`  
-- **SpoutCam3**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam\SpoutCam3`
-- **SpoutCam4**: `HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam\SpoutCam4`
+### Creating New Cameras
+
+1. **Launch SpoutCamSettings** (run as Administrator)
+2. **Click "Add New Camera"** button
+3. **Enter a descriptive name** (e.g., "OBS Main Camera", "Zoom Virtual Cam")
+4. **Click "Activate"** to make it available to applications
+
+### Camera Naming Rules
+
+✅ **Valid**: Letters, numbers, spaces, hyphens, underscores  
+✅ **Examples**: "SpoutCam", "OBS Camera", "Stream-Overlay", "Zoom_Background"  
+❌ **Invalid**: Special characters like @#$%^&*()  
+📏 **Length**: 1-64 characters
+
+### Registry Structure
+
+Each camera gets its own registry path based on name:
+```
+HKEY_CURRENT_USER\Software\Leading Edge\SpoutCam\[CameraName]
+├── fps          # Frame rate setting
+├── resolution   # Output resolution
+├── mirror       # Horizontal mirroring
+├── flip         # Vertical flipping  
+├── swap         # RGB/BGR color swap
+└── sendername   # Active Spout sender
+```
 
 This allows each camera to have independent settings for:
 - **fps** - Frame rate (10, 15, 25, 30, 50, 60 fps)
@@ -56,19 +69,21 @@ Each virtual camera now has an **improved settings dialog** with:
   - **Specific Sender** - Lock to a particular sender by name
   - **Custom Name** - Type any sender name manually
 
-### 📋 **Settings Dialog Layout:**
+### 📋 **SpoutCamSettings UI:**
 ```
-Camera Configuration
-┌─────────────────────────────────┐
-│ Configuring: SpoutCam2          │
-├─────────────┬───────────────────┤
-│ Frame Rate  │ Starting Resolution│
-├─────────────┴───────────────────┤
-│ Available Senders: [Dropdown ▼] │
-│ Custom Sender Name: [Text Box ] │
-├─────────────────────────────────┤
-│ ☐ Mirror  ☐ Flip  ☐ Swap RGB/BGR│
-└─────────────────────────────────┘
+SpoutCam Dynamic Camera Manager
+┌──────────────────────────────────────────┐
+│ Camera List:                             │
+│ ┌──────────────────────────────────────┐ │
+│ │ Name             │ Status   │ Settings││ │
+│ │ OBS Main Camera  │ Active   │ Yes     ││ │
+│ │ Zoom Background  │ Inactive │ Yes     ││ │
+│ │ Stream Overlay   │ Active   │ No      ││ │
+│ └──────────────────────────────────────┘ │
+├──────────────────────────────────────────┤
+│ [Add New Camera] [Activate] [Deactivate] │
+│ [Properties] [Remove] [Refresh List]     │
+└──────────────────────────────────────────┘
 ```
 
 ## Usage Examples
@@ -78,29 +93,38 @@ Camera Configuration
 3. **Streaming Software**: Use different cameras for different scenes/overlays
 4. **Multi-camera Setups**: Route different Spout senders to different applications
 
-### 🎬 **Multi-Source Workflow:**
-1. **Right-click each SpoutCam** in your video application → Properties
-2. **Select different senders** for each camera in the settings dialog
-3. **Click Refresh** to see newly started Spout applications  
-4. **Use "Auto"** for dynamic switching or **specific names** for fixed routing
+### 🎬 **Multi-Camera Workflow:**
+1. **Create cameras with descriptive names** ("OBS Main", "Zoom BG", "Stream Overlay")
+2. **Activate desired cameras** through SpoutCamSettings
+3. **Configure each camera independently** - different FPS, resolution, Spout senders
+4. **Use in applications** - each appears as separate webcam device
+5. **Right-click camera properties** to change Spout sender or settings
 
 ## Technical Details
 
-### CLSID Generation
-Each camera gets a unique CLSID by incrementing the last byte:
-- SpoutCam: `{8E14549A-DB61-4309-AFA1-3578E927E933}`
-- SpoutCam2: `{8E14549A-DB61-4309-AFA1-3578E927E934}`
-- SpoutCam3: `{8E14549A-DB61-4309-AFA1-3578E927E935}`
-- etc.
+### Dynamic CLSID Generation
+Each camera gets a **unique CLSID generated from its name**:
+- Uses hash-based generation for consistency
+- Same name always produces same CLSID
+- Eliminates fixed slot limitations
+- Examples:
+  - "SpoutCam" → `{8E14549A-DB61-4309-AFA1-3578E927E933}`
+  - "OBS Camera" → `{8E14549A-DB61-4309-AFA1-[unique-hash]}`
+  - "Stream Overlay" → `{8E14549A-DB61-4309-AFA1-[unique-hash]}`
 
-### Factory Functions
-Each camera has its own factory function (`CreateCamera0`, `CreateCamera1`, etc.) to ensure proper instantiation with the correct configuration.
+### Dynamic Factory System
+No more hard-coded factory functions:
+- **Single dynamic factory** resolves cameras by CLSID
+- **Name-based instantiation** throughout the system
+- **Runtime camera discovery** from registry
+- **Unlimited scalability** - no MAX_CAMERAS limit
 
 ## Building and Registration
 
-1. **Build**: Compile the project - all cameras are built into the single `.ax` file
-2. **Register**: Use `regsvr32 SpoutCam64.ax` - registers all cameras at once  
-3. **Unregister**: Use `regsvr32 /u SpoutCam64.ax` - unregisters all cameras
+1. **Build**: `./build.bat` - compiles single `.ax` file with dynamic system
+2. **Register**: `regsvr32 SpoutCam64.ax` - registers the dynamic framework  
+3. **Create Cameras**: Use SpoutCamSettings UI to create/activate cameras
+4. **Unregister**: `regsvr32 /u SpoutCam64.ax` - removes all camera registrations
 
 ## Compatibility
 
@@ -109,16 +133,46 @@ Each camera has its own factory function (`CreateCamera0`, `CreateCamera1`, etc.
 - **Spout SDK**: Compatible with Spout 2.007+
 - **Performance**: Minimal overhead per additional camera
 
+## Advanced Usage
+
+### API Integration
+Developers can use the C++ API:
+```cpp
+auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+
+// Create camera
+auto camera = manager->CreateCamera("My Custom Camera");
+
+// Activate/deactivate
+manager->ActivateCamera("My Custom Camera");
+manager->DeactivateCamera("My Custom Camera");
+
+// List cameras
+auto names = manager->GetCameraNames();
+auto active = manager->GetActiveCameraNames();
+
+// Validate names
+bool valid = manager->ValidateCameraName("New Camera Name");
+```
+
+### Migration from Legacy System
+- **Existing cameras preserved**: "SpoutCam", "SpoutCam2", etc. still work
+- **Registry compatibility**: Old settings automatically migrated
+- **Gradual transition**: Can mix legacy numbered and new named cameras
+
 ## Troubleshooting
 
-- **Cameras not appearing**: Ensure registration was successful
-- **Same image on all cameras**: Check that different senders are running or configure different starting senders
-- **Settings not saving**: Verify registry permissions
-- **Performance issues**: Reduce number of active cameras or lower resolution/fps
+- **Camera not appearing**: Check if activated in SpoutCamSettings
+- **Permission errors**: Run SpoutCamSettings as Administrator
+- **Name conflicts**: Use unique, descriptive names
+- **Performance**: Limit active cameras based on system capabilities
+- **Registry cleanup**: Use provided PowerShell cleanup scripts if needed
 
-## Notes
+## Benefits Over Legacy System
 
-- Each virtual webcam runs independently
-- Settings are stored per-camera in the registry
-- All cameras share the same executable but have separate configurations
-- Original SpoutCam behavior is preserved for backward compatibility
+✅ **No MAX_CAMERAS limit** - create unlimited cameras  
+✅ **Descriptive naming** - "OBS Camera" vs "SpoutCam4"  
+✅ **Dynamic management** - add/remove without restart  
+✅ **Cleaner codebase** - no hard-coded factory functions  
+✅ **Better UX** - intuitive camera management UI  
+✅ **Future-proof** - scalable architecture for new features

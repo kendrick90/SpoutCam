@@ -108,6 +108,11 @@ DynamicCameraConfig* DynamicCameraManager::GetCamera(const std::string& cameraNa
 }
 
 DynamicCameraConfig* DynamicCameraManager::GetCameraByCLSID(const GUID& clsid) {
+    // Ensure cameras are loaded from registry first
+    if (m_clsidToName.empty()) {
+        LoadCamerasFromRegistry();
+    }
+    
     std::string clsidStr = GuidToString(clsid);
     auto it = m_clsidToName.find(clsidStr);
     if (it != m_clsidToName.end()) {
@@ -197,6 +202,9 @@ bool DynamicCameraManager::StringToGuid(const std::string& str, GUID& guid) {
 }
 
 bool DynamicCameraManager::LoadCamerasFromRegistry() {
+    // Remove performance cache that blocks real-time updates
+    // Always reload to ensure UI changes are immediately reflected
+    
     HKEY hKey;
     LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, 
         "Software\\Leading Edge\\SpoutCam", 0, KEY_READ, &hKey);
@@ -281,13 +289,27 @@ bool DynamicCameraManager::LoadCamerasFromRegistry() {
     
     RegCloseKey(hKey);
     
-    // Clean up any cameras with empty names that may have been loaded
-    auto it = m_cameras.find("");
-    if (it != m_cameras.end()) {
-        m_clsidToName.erase(GuidToString(it->second.clsid));
-        m_propPageClsidToName.erase(GuidToString(it->second.propPageClsid));
-        m_cameras.erase(it);
-        DeleteCameraFromRegistry("");  // Clean up from registry too
+    // Clean up any cameras with invalid names that may have been loaded
+    std::vector<std::string> invalidCameras;
+    for (auto& pair : m_cameras) {
+        const std::string& name = pair.first;
+        // Check for invalid camera names
+        if (name.empty() || 
+            name == "Cameras" ||  // Ghost entry that appears in UI
+            !IsValidCameraName(name)) {
+            invalidCameras.push_back(name);
+        }
+    }
+    
+    // Remove all invalid cameras
+    for (const std::string& name : invalidCameras) {
+        auto it = m_cameras.find(name);
+        if (it != m_cameras.end()) {
+            m_clsidToName.erase(GuidToString(it->second.clsid));
+            m_propPageClsidToName.erase(GuidToString(it->second.propPageClsid));
+            m_cameras.erase(it);
+            DeleteCameraFromRegistry(name);  // Clean up from registry too
+        }
     }
     
     // Don't auto-create default cameras here
@@ -417,6 +439,120 @@ std::string DynamicCameraManager::GenerateAvailableName(const std::string& baseN
     } while (m_cameras.find(newName) != m_cameras.end());
     
     return newName;
+}
+
+// Enhanced name-based API implementation
+
+std::vector<std::string> DynamicCameraManager::GetCameraNames() const {
+    std::vector<std::string> names;
+    for (const auto& pair : m_cameras) {
+        names.push_back(pair.first);
+    }
+    return names;
+}
+
+std::vector<std::string> DynamicCameraManager::GetActiveCameraNames() const {
+    std::vector<std::string> names;
+    for (const auto& pair : m_cameras) {
+        if (pair.second.isActive) {
+            names.push_back(pair.first);
+        }
+    }
+    return names;
+}
+
+bool DynamicCameraManager::ValidateCameraName(const std::string& name) const {
+    return IsValidCameraName(name) && !CameraExists(name);
+}
+
+bool DynamicCameraManager::CameraExists(const std::string& cameraName) const {
+    return m_cameras.find(cameraName) != m_cameras.end();
+}
+
+bool DynamicCameraManager::ActivateCamera(const std::string& cameraName) {
+    auto it = m_cameras.find(cameraName);
+    if (it != m_cameras.end()) {
+        it->second.isActive = true;
+        return true;
+    }
+    return false;
+}
+
+bool DynamicCameraManager::DeactivateCamera(const std::string& cameraName) {
+    auto it = m_cameras.find(cameraName);
+    if (it != m_cameras.end()) {
+        it->second.isActive = false;
+        return true;
+    }
+    return false;
+}
+
+size_t DynamicCameraManager::GetActiveCameraCount() const {
+    size_t count = 0;
+    for (const auto& pair : m_cameras) {
+        if (pair.second.isActive) {
+            count++;
+        }
+    }
+    return count;
+}
+
+size_t DynamicCameraManager::GetTotalCameraCount() const {
+    return m_cameras.size();
+}
+
+std::string DynamicCameraManager::SanitizeCameraName(const std::string& name) const {
+    std::string sanitized = name;
+    
+    // Remove leading/trailing whitespace
+    size_t start = sanitized.find_first_not_of(" \t\n\r");
+    if (start != std::string::npos) {
+        sanitized = sanitized.substr(start);
+    }
+    size_t end = sanitized.find_last_not_of(" \t\n\r");
+    if (end != std::string::npos) {
+        sanitized = sanitized.substr(0, end + 1);
+    }
+    
+    // Replace invalid characters with underscores
+    for (char& c : sanitized) {
+        if (!std::isalnum(c) && c != ' ' && c != '-' && c != '_') {
+            c = '_';
+        }
+    }
+    
+    // Limit length
+    if (sanitized.length() > 64) {
+        sanitized = sanitized.substr(0, 64);
+    }
+    
+    // Ensure not empty
+    if (sanitized.empty()) {
+        sanitized = "SpoutCam";
+    }
+    
+    return sanitized;
+}
+
+bool DynamicCameraManager::IsValidCameraName(const std::string& name) const {
+    // Check length
+    if (name.empty() || name.length() > 64) {
+        return false;
+    }
+    
+    // Check for invalid characters
+    for (char c : name) {
+        if (!std::isalnum(c) && c != ' ' && c != '-' && c != '_') {
+            return false;
+        }
+    }
+    
+    // Check for leading/trailing whitespace
+    if (name.front() == ' ' || name.back() == ' ') {
+        return false;
+    }
+    
+    return true;
 }
 
 // C-style export functions for compatibility

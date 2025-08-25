@@ -36,30 +36,53 @@ void CSpoutCamProperties::InitializeProps()
 // Used by the DirectShow base classes to create instances
 CUnknown *CSpoutCamProperties::CreateInstance(LPUNKNOWN lpunk, HRESULT *phr)
 {
+	// Enable console for debugging
+	AllocConsole();
+	freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
+	
+	printf("\n=== CSpoutCamProperties::CreateInstance CALLED ===\n");
+	printf("lpunk = %p\n", lpunk);
+	printf("Creating DEFAULT property page instance (camera index 0)\n");
+	
 	ASSERT(phr);
 	CUnknown *punk = new CSpoutCamProperties(lpunk, phr);
 	if (punk == NULL)
 	{
 		if (phr)
 			*phr = E_OUTOFMEMORY;
+		printf("ERROR: Failed to create CSpoutCamProperties instance\n");
+	} else {
+		printf("SUCCESS: Created default CSpoutCamProperties instance\n");
 	}
+	printf("=== CSpoutCamProperties::CreateInstance END ===\n\n");
 	return punk;
 } // CreateInstance
 
 // Camera-specific factory function that knows which camera it represents
 CUnknown *CSpoutCamProperties::CreateInstanceForCamera(LPUNKNOWN lpunk, HRESULT *phr, const std::string& cameraName)
 {
+	// Enable console for debugging
+	AllocConsole();
+	freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
+	
+	printf("\n=== CSpoutCamProperties::CreateInstanceForCamera CALLED ===\n");
+	printf("lpunk = %p\n", lpunk);
+	printf("cameraName = '%s'\n", cameraName.c_str());
+	
 	ASSERT(phr);
 	CSpoutCamProperties* props = new CSpoutCamProperties(lpunk, phr);
 	if (props == NULL)
 	{
 		if (phr)
 			*phr = E_OUTOFMEMORY;
+		printf("ERROR: Failed to create CSpoutCamProperties instance\n");
 		return nullptr;
 	}
 	
 	// Set the camera name so the property page knows which camera it represents
 	props->m_cameraName = cameraName;
+	printf("SUCCESS: Created property page for camera '%s'\n", cameraName.c_str());
+	printf("=== CSpoutCamProperties::CreateInstanceForCamera END ===\n\n");
 	
 	return props;
 }
@@ -396,7 +419,7 @@ HRESULT CSpoutCamProperties::OnActivate()
 	////////////////////////////////////////
 
 	// Initialize fps dropdown with defaults (actual values loaded by InitializeProps)
-	dwValue = 1; // default 1 = 30 fps
+	dwValue = 5; // default 5 = 60 fps
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_FPS);
 	
@@ -405,9 +428,9 @@ HRESULT CSpoutCamProperties::OnActivate()
 		L"10",
 		L"15",
 		L"25",
-		L"30", // default
+		L"30",
 		L"50",
-		L"60"
+		L"60" // default
 	};
 
 	WCHAR fps[3];
@@ -606,6 +629,17 @@ HRESULT CSpoutCamProperties::OnApplyChanges()
 	dwSilent = Button_GetCheck(GetDlgItem(this->m_Dlg, IDC_SILENT));
 	WriteDwordToRegistry(HKEY_CURRENT_USER, "Software\\Leading Edge\\SpoutCam", "silent", dwSilent);
 	
+	// CRITICAL FIX: Save sender name to DynamicCameraManager for persistence
+	if (!m_cameraName.empty()) {
+		auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+		auto camera = manager->GetCamera(m_cameraName);
+		if (camera) {
+			camera->senderName = std::string(name);
+			manager->SaveCameraToRegistry(*camera);
+			printf("CSpoutCamProperties: Saved sender name '%s' for camera '%s'\n", name, m_cameraName.c_str());
+		}
+	}
+	
 	// Apply settings to the camera filter for immediate effect
 	if (m_pCamSettings)
 		m_pCamSettings->put_Settings(dwFps, dwResolution, dwMirror, dwSwap, dwFlip, name);
@@ -649,11 +683,11 @@ void CSpoutCamProperties::GetCameraRegistryPath(char* registryPath, size_t buffe
 	if (!m_cameraName.empty()) {
 		sprintf_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam\\%s", m_cameraName.c_str());
 	} else {
-		// Fallback to old logic
+		// Fallback to old logic for legacy compatibility
 		if (m_cameraIndex == 0) {
-			strcpy_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam");
+			sprintf_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam\\SpoutCam");
 		} else {
-			sprintf_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam%d", m_cameraIndex + 1);
+			sprintf_s(registryPath, bufferSize, "Software\\Leading Edge\\SpoutCam\\SpoutCam%d", m_cameraIndex + 1);
 		}
 	}
 }
@@ -1165,7 +1199,7 @@ void CSpoutCamProperties::GetActiveSenderDefaults(DWORD* pDefaultFps, DWORD* pDe
 	if (!pDefaultFps || !pDefaultResolution) return;
 	
 	// Set fallback defaults
-	*pDefaultFps = 3; // 30 FPS
+	*pDefaultFps = 5; // 60 FPS
 	*pDefaultResolution = 0; // Active sender
 	
 	// Create a temporary SpoutDX receiver instance to query active sender
@@ -1273,7 +1307,7 @@ void CSpoutCamProperties::UpdateCameraName(const char* newName)
 	char oldRegistryPath[512];
 	char newRegistryPath[512];
 	GetCameraRegistryPath(oldRegistryPath, sizeof(oldRegistryPath));
-	sprintf_s(newRegistryPath, sizeof(newRegistryPath), "Software\\Leading Edge\\SpoutCam\\%s", newName);
+	sprintf_s(newRegistryPath, sizeof(newRegistryPath), "SOFTWARE\\Leading Edge\\SpoutCam\\Cameras\\%s", newName);
 	
 	// Migrate all settings from old registry path to new registry path
 	HKEY oldKey, newKey;

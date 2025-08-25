@@ -15,6 +15,8 @@ public:
 	static CUnknown * WINAPI CreateInstance(LPUNKNOWN lpunk, HRESULT *phr);
 	// Camera-specific factory function that knows which camera it represents
 	static CUnknown * WINAPI CreateInstanceForCamera(LPUNKNOWN lpunk, HRESULT *phr, const std::string& cameraName);
+	// Dynamic factory that determines camera from CLSID context
+	static CUnknown * WINAPI CreateDynamicInstance(LPUNKNOWN lpunk, HRESULT *phr, REFCLSID clsid);
 
 private:
 

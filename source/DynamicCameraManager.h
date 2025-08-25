@@ -67,6 +67,16 @@ public:
     bool DeleteCamera(const std::string& cameraName);
     bool UpdateCameraName(const std::string& oldName, const std::string& newName);
     
+    // Enhanced name-based API
+    std::vector<std::string> GetCameraNames() const;
+    std::vector<std::string> GetActiveCameraNames() const;
+    bool ValidateCameraName(const std::string& name) const;
+    bool CameraExists(const std::string& cameraName) const;
+    bool ActivateCamera(const std::string& cameraName);
+    bool DeactivateCamera(const std::string& cameraName);
+    size_t GetActiveCameraCount() const;
+    size_t GetTotalCameraCount() const;
+    
     // Get all cameras
     std::vector<DynamicCameraConfig*> GetAllCameras();
     
@@ -81,8 +91,10 @@ public:
     bool CameraHasSettings(const std::string& cameraName);
     void SetCameraHasSettings(const std::string& cameraName, bool hasSettings);
     
-    // Find available name
+    // Name generation and validation
     std::string GenerateAvailableName(const std::string& baseName = "SpoutCam");
+    std::string SanitizeCameraName(const std::string& name) const;
+    bool IsValidCameraName(const std::string& name) const;
     
 private:
     // Hash function for GUID generation

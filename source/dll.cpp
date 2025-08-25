@@ -32,11 +32,21 @@
 #include <initguid.h>
 #include <dllsetup.h>
 
+// Include DirectShow base classes for CClassFactory
+#include <streams.h>
+
 #define CreateComObject(clsid, iid, var) CoCreateInstance( clsid, NULL, CLSCTX_INPROC_SERVER, iid, (void **)&var);
 
 STDAPI AMovieSetupRegisterServer( CLSID clsServer, LPCWSTR szDescription, LPCWSTR szFileName, LPCWSTR szThreadingModel = L"Both", LPCWSTR szServerType = L"InprocServer32" );
 STDAPI AMovieSetupUnregisterServer( CLSID clsServer );
 HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex );
+HRESULT RegisterCameraInstanceOnly(const GUID& instanceGuid, const WCHAR* friendlyName);
+HRESULT UnregisterCameraInstanceOnly(const GUID& instanceGuid);
+HRESULT RegisterPrimaryCameraFilter( BOOL bRegister );
+
+// Primary SpoutCam CLSIDs - only these get registered in the system
+const GUID CLSID_SpoutCam_Primary = {0x8e14549a, 0xdb61, 0x4309, {0xaf, 0xa1, 0x35, 0x78, 0xe9, 0x27, 0xe9, 0x33}};
+const GUID CLSID_SpoutCam_PropPage_Primary = {0xcd7780b7, 0x40d2, 0x4f33, {0x80, 0xe2, 0xb0, 0x2e, 0x00, 0x9c, 0xe6, 0x33}};
 
 //
 // The NAME OF THE CAMERA CAN BE CHANGED HERE
@@ -88,6 +98,16 @@ const AMOVIESETUP_PIN AMSPinVCam=
     NULL,                  // Connects to pin - obsolete
     1,                     // Number of types
     &AMSMediaTypesVCam     // Pointer to media types
+};
+
+// Static filter setup for single CLSID approach
+const AMOVIESETUP_FILTER AMSFilterVCam = 
+{
+    &CLSID_SpoutCam_Primary,  // Filter CLSID
+    L"SpoutCam",              // String name
+    MERIT_DO_NOT_USE,         // Filter merit
+    1,                        // Number pins
+    &AMSPinVCam               // Pin details
 };
 
 // Dynamic filter setup arrays
@@ -142,91 +162,440 @@ CUnknown * WINAPI CreateDynamicCamera(LPUNKNOWN lpunk, HRESULT *phr, const GUID&
 CFactoryTemplate g_Templates[MAX_DYNAMIC_CAMERAS * 2];
 int g_cTemplates = 0;
 
-// Factory function wrapper that finds camera by CLSID
-CUnknown * WINAPI CreateCameraByIndex(int index, LPUNKNOWN lpunk, HRESULT *phr) {
-    if (index >= 0 && index < (int)g_DynamicCameraConfigs.size()) {
-        return CVCam::CreateCameraInstance(lpunk, phr, g_DynamicCameraConfigs[index].clsid);
+// CLSID comparator for std::map
+struct CLSIDComparator {
+    bool operator()(const CLSID& lhs, const CLSID& rhs) const {
+        return memcmp(&lhs, &rhs, sizeof(CLSID)) < 0;
     }
-    *phr = E_FAIL;
-    return nullptr;
+};
+
+// CLSID to camera name mapping for factory functions
+std::map<CLSID, std::string, CLSIDComparator> g_CLSIDToCameraName;
+
+// Property page CLSID to camera name mapping
+std::map<CLSID, std::string, CLSIDComparator> g_PropPageCLSIDToCameraName;
+
+// Predefined property page factory functions for different cameras
+CUnknown * WINAPI CreatePropertyPageInstance0(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreatePropertyPageInstance1(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreatePropertyPageInstance2(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreatePropertyPageInstance3(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreatePropertyPageInstance4(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreatePropertyPageInstance5(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreatePropertyPageInstance6(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreatePropertyPageInstance7(LPUNKNOWN lpunk, HRESULT *phr);
+
+// Array of factory functions
+CUnknown * (WINAPI *g_PropertyPageFactoryFunctions[])(LPUNKNOWN, HRESULT *) = {
+    CreatePropertyPageInstance0, CreatePropertyPageInstance1, CreatePropertyPageInstance2, CreatePropertyPageInstance3,
+    CreatePropertyPageInstance4, CreatePropertyPageInstance5, CreatePropertyPageInstance6, CreatePropertyPageInstance7
+};
+
+// Camera names for each factory function index
+std::vector<std::string> g_FactoryIndexToCameraName;
+
+// Individual camera factory functions - similar to property pages
+CUnknown * WINAPI CreateCameraInstance0(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreateCameraInstance1(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreateCameraInstance2(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreateCameraInstance3(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreateCameraInstance4(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreateCameraInstance5(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreateCameraInstance6(LPUNKNOWN lpunk, HRESULT *phr);
+CUnknown * WINAPI CreateCameraInstance7(LPUNKNOWN lpunk, HRESULT *phr);
+
+// Array of camera factory functions
+CUnknown * (WINAPI *g_CameraFactoryFunctions[])(LPUNKNOWN, HRESULT *) = {
+    CreateCameraInstance0, CreateCameraInstance1, CreateCameraInstance2, CreateCameraInstance3,
+    CreateCameraInstance4, CreateCameraInstance5, CreateCameraInstance6, CreateCameraInstance7
+};
+
+
+
+// Enhanced property page factory that determines camera from CLSID mapping
+CUnknown * WINAPI CreatePropertyPageInstance(LPUNKNOWN lpunk, HRESULT *phr) {
+    // Enable console for debugging
+    static bool consoleAllocated = false;
+    if (!consoleAllocated) {
+        AllocConsole();
+        freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
+        freopen_s((FILE**)stderr, "CONOUT$", "w", stderr);
+        SetConsoleTitle(L"SpoutCam Property Page Debug");
+        consoleAllocated = true;
+    }
+    
+    // Also write to log file
+    FILE* logFile = nullptr;
+    fopen_s(&logFile, "C:\\temp\\spoutcam_debug.log", "a");
+    
+    auto logOutput = [&](const char* format, ...) {
+        va_list args;
+        va_start(args, format);
+        vprintf(format, args);
+        if (logFile) {
+            vfprintf(logFile, format, args);
+            fflush(logFile);
+        }
+        va_end(args);
+    };
+    
+    logOutput("\n=== CreatePropertyPageInstance CALLED ===\n");
+    logOutput("lpunk = %p\n", lpunk);
+    
+    // Try to determine which camera this property page is for
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    auto cameras = manager->GetAllCameras();
+    
+    logOutput("Available cameras: %d\n", (int)cameras.size());
+    for (size_t i = 0; i < cameras.size(); i++) {
+        logOutput("  Camera %d: '%s'\n", (int)i, cameras[i]->name.c_str());
+    }
+    
+    // If there's only one camera, use it
+    if (cameras.size() == 1) {
+        std::string cameraName = cameras[0]->name;
+        logOutput("SUCCESS: Only one camera available, using '%s'\n", cameraName.c_str());
+        if (logFile) fclose(logFile);
+        return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, cameraName);
+    }
+    
+    // If multiple cameras exist, we need a way to determine which one
+    // Check if we can find it in the CLSID mapping
+    logOutput("Multiple cameras available, checking CLSID mappings...\n");
+    if (!g_PropPageCLSIDToCameraName.empty()) {
+        // For now, use the first mapped camera as a fallback
+        std::string cameraName = g_PropPageCLSIDToCameraName.begin()->second;
+        logOutput("Using first mapped camera: '%s'\n", cameraName.c_str());
+        if (logFile) fclose(logFile);
+        return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, cameraName);
+    }
+    
+    // Try to extract camera info from the filter that owns this property page
+    if (lpunk) {
+        logOutput("Attempting to query lpunk for ICamSettings interface...\n");
+        
+        // Query for ICamSettings interface which should give us camera info
+        ICamSettings* pCamSettings = nullptr;
+        HRESULT hr = lpunk->QueryInterface(IID_ICamSettings, (void**)&pCamSettings);
+        if (SUCCEEDED(hr) && pCamSettings) {
+            logOutput("SUCCESS: Got ICamSettings interface from filter\n");
+            
+            // Try to get camera name from the filter
+            char cameraName[256] = {0};
+            hr = pCamSettings->get_CameraName(cameraName, sizeof(cameraName));
+            if (SUCCEEDED(hr) && strlen(cameraName) > 0) {
+                logOutput("SUCCESS: Got camera name from filter: '%s'\n", cameraName);
+                pCamSettings->Release();
+                if (logFile) fclose(logFile);
+                return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, std::string(cameraName));
+            }
+            
+            // Try to get camera index and derive name
+            int cameraIndex = 0;
+            hr = pCamSettings->get_CameraIndex(&cameraIndex);
+            if (SUCCEEDED(hr)) {
+                logOutput("Got camera index from filter: %d\n", cameraIndex);
+                // Convert index to camera name using manager
+                auto cameras = manager->GetAllCameras();
+                if (cameraIndex >= 0 && cameraIndex < (int)cameras.size()) {
+                    std::string cameraName = cameras[cameraIndex]->name;
+                    logOutput("SUCCESS: Resolved camera name from index: '%s'\n", cameraName.c_str());
+                    pCamSettings->Release();
+                    if (logFile) fclose(logFile);
+                    return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, cameraName);
+                }
+            }
+            
+            pCamSettings->Release();
+        } else {
+            logOutput("Failed to get ICamSettings interface, hr = 0x%08X\n", hr);
+        }
+        
+        if (SUCCEEDED(hr) && pCamSettings) {
+            logOutput("SUCCESS: Got ICamSettings interface\n");
+            // Try to get camera name from the filter
+            char cameraName[256] = {0};
+            HRESULT nameResult = pCamSettings->get_CameraName(cameraName, 256);
+            logOutput("get_CameraName result: 0x%08X, name: '%s'\n", nameResult, cameraName);
+            
+            if (SUCCEEDED(nameResult) && strlen(cameraName) > 0) {
+                logOutput("SUCCESS: Creating property page for camera '%s' using filter interface\n", cameraName);
+                pCamSettings->Release();
+                if (logFile) fclose(logFile);
+                return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, std::string(cameraName));
+            } else {
+                logOutput("WARNING: get_CameraName failed or returned empty name\n");
+            }
+            pCamSettings->Release();
+        } else {
+            logOutput("WARNING: Failed to get ICamSettings interface\n");
+        }
+    } else {
+        logOutput("WARNING: lpunk is NULL\n");
+    }
+    
+    // Final fallback: create default property page
+    logOutput("FALLBACK: Creating default property page (camera detection failed)\n");
+    logOutput("=== CreatePropertyPageInstance END ===\n\n");
+    logOutput("Press any key in this console to continue debugging...\n");
+    
+    if (logFile) fclose(logFile);
+    return CSpoutCamProperties::CreateInstance(lpunk, phr);
 }
 
-// Property page factory function wrapper that finds camera by index
-CUnknown * WINAPI CreatePropertyPageByIndex(int index, LPUNKNOWN lpunk, HRESULT *phr) {
-    if (index >= 0 && index < (int)g_DynamicCameraConfigs.size()) {
+// Individual property page factory functions - each knows which camera it represents
+CUnknown * WINAPI CreatePropertyPageInstance0(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (phr) *phr = S_OK;
+    
+    try {
+        if (0 < g_FactoryIndexToCameraName.size()) {
+            std::string cameraName = g_FactoryIndexToCameraName[0];
+            if (!cameraName.empty()) {
+                return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, cameraName);
+            }
+        }
+    } catch (...) {
+        if (phr) *phr = E_FAIL;
+        return nullptr;
+    }
+    
+    return CSpoutCamProperties::CreateInstance(lpunk, phr);
+}
+
+CUnknown * WINAPI CreatePropertyPageInstance1(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (1 < g_FactoryIndexToCameraName.size()) {
+        return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, g_FactoryIndexToCameraName[1]);
+    }
+    return CSpoutCamProperties::CreateInstance(lpunk, phr);
+}
+
+CUnknown * WINAPI CreatePropertyPageInstance2(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (2 < g_FactoryIndexToCameraName.size()) {
+        return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, g_FactoryIndexToCameraName[2]);
+    }
+    return CSpoutCamProperties::CreateInstance(lpunk, phr);
+}
+
+CUnknown * WINAPI CreatePropertyPageInstance3(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (3 < g_FactoryIndexToCameraName.size()) {
+        return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, g_FactoryIndexToCameraName[3]);
+    }
+    return CSpoutCamProperties::CreateInstance(lpunk, phr);
+}
+
+CUnknown * WINAPI CreatePropertyPageInstance4(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (4 < g_FactoryIndexToCameraName.size()) {
+        return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, g_FactoryIndexToCameraName[4]);
+    }
+    return CSpoutCamProperties::CreateInstance(lpunk, phr);
+}
+
+CUnknown * WINAPI CreatePropertyPageInstance5(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (5 < g_FactoryIndexToCameraName.size()) {
+        return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, g_FactoryIndexToCameraName[5]);
+    }
+    return CSpoutCamProperties::CreateInstance(lpunk, phr);
+}
+
+CUnknown * WINAPI CreatePropertyPageInstance6(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (6 < g_FactoryIndexToCameraName.size()) {
+        return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, g_FactoryIndexToCameraName[6]);
+    }
+    return CSpoutCamProperties::CreateInstance(lpunk, phr);
+}
+
+CUnknown * WINAPI CreatePropertyPageInstance7(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (7 < g_FactoryIndexToCameraName.size()) {
+        return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, g_FactoryIndexToCameraName[7]);
+    }
+    return CSpoutCamProperties::CreateInstance(lpunk, phr);
+}
+
+// Individual camera factory functions - each creates a specific camera
+CUnknown * WINAPI CreateCameraInstance0(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (0 < g_FactoryIndexToCameraName.size()) {
+        std::string cameraName = g_FactoryIndexToCameraName[0];
         auto manager = SpoutCam::DynamicCameraManager::GetInstance();
-        auto cameras = manager->GetAllCameras();
-        if (index < (int)cameras.size()) {
-            return CSpoutCamProperties::CreateInstanceForCamera(lpunk, phr, cameras[index]->name);
+        auto camera = manager->GetCamera(cameraName);
+        if (camera) {
+            return CVCam::CreateCameraInstance(lpunk, phr, camera->clsid);
         }
     }
-    *phr = E_FAIL;
-    return nullptr;
+    return CVCam::CreateInstance(lpunk, phr);
 }
 
-// Individual factory functions for each potential camera (DirectShow needs static functions)
-#define MAKE_CAMERA_FACTORY(n) \
-CUnknown * WINAPI CreateCamera##n(LPUNKNOWN lpunk, HRESULT *phr) { \
-    return CreateCameraByIndex(n, lpunk, phr); \
+CUnknown * WINAPI CreateCameraInstance1(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (1 < g_FactoryIndexToCameraName.size()) {
+        std::string cameraName = g_FactoryIndexToCameraName[1];
+        auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+        auto camera = manager->GetCamera(cameraName);
+        if (camera) {
+            return CVCam::CreateCameraInstance(lpunk, phr, camera->clsid);
+        }
+    }
+    return CVCam::CreateInstance(lpunk, phr);
 }
 
-// Individual property page factory functions
-#define MAKE_PROPPAGE_FACTORY(n) \
-CUnknown * WINAPI CreatePropertyPage##n(LPUNKNOWN lpunk, HRESULT *phr) { \
-    return CreatePropertyPageByIndex(n, lpunk, phr); \
+CUnknown * WINAPI CreateCameraInstance2(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (2 < g_FactoryIndexToCameraName.size()) {
+        std::string cameraName = g_FactoryIndexToCameraName[2];
+        auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+        auto camera = manager->GetCamera(cameraName);
+        if (camera) {
+            return CVCam::CreateCameraInstance(lpunk, phr, camera->clsid);
+        }
+    }
+    return CVCam::CreateInstance(lpunk, phr);
 }
 
-// Generate factory functions for up to 128 cameras
-MAKE_CAMERA_FACTORY(0)  MAKE_CAMERA_FACTORY(1)  MAKE_CAMERA_FACTORY(2)  MAKE_CAMERA_FACTORY(3)
-MAKE_CAMERA_FACTORY(4)  MAKE_CAMERA_FACTORY(5)  MAKE_CAMERA_FACTORY(6)  MAKE_CAMERA_FACTORY(7)
-MAKE_CAMERA_FACTORY(8)  MAKE_CAMERA_FACTORY(9)  MAKE_CAMERA_FACTORY(10) MAKE_CAMERA_FACTORY(11)
-MAKE_CAMERA_FACTORY(12) MAKE_CAMERA_FACTORY(13) MAKE_CAMERA_FACTORY(14) MAKE_CAMERA_FACTORY(15)
+CUnknown * WINAPI CreateCameraInstance3(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (3 < g_FactoryIndexToCameraName.size()) {
+        std::string cameraName = g_FactoryIndexToCameraName[3];
+        auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+        auto camera = manager->GetCamera(cameraName);
+        if (camera) {
+            return CVCam::CreateCameraInstance(lpunk, phr, camera->clsid);
+        }
+    }
+    return CVCam::CreateInstance(lpunk, phr);
+}
 
-// Generate property page factory functions for up to 16 cameras 
-MAKE_PROPPAGE_FACTORY(0)  MAKE_PROPPAGE_FACTORY(1)  MAKE_PROPPAGE_FACTORY(2)  MAKE_PROPPAGE_FACTORY(3)
-MAKE_PROPPAGE_FACTORY(4)  MAKE_PROPPAGE_FACTORY(5)  MAKE_PROPPAGE_FACTORY(6)  MAKE_PROPPAGE_FACTORY(7)
-MAKE_PROPPAGE_FACTORY(8)  MAKE_PROPPAGE_FACTORY(9)  MAKE_PROPPAGE_FACTORY(10) MAKE_PROPPAGE_FACTORY(11)
-MAKE_PROPPAGE_FACTORY(12) MAKE_PROPPAGE_FACTORY(13) MAKE_PROPPAGE_FACTORY(14) MAKE_PROPPAGE_FACTORY(15)
+CUnknown * WINAPI CreateCameraInstance4(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (4 < g_FactoryIndexToCameraName.size()) {
+        std::string cameraName = g_FactoryIndexToCameraName[4];
+        auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+        auto camera = manager->GetCamera(cameraName);
+        if (camera) {
+            return CVCam::CreateCameraInstance(lpunk, phr, camera->clsid);
+        }
+    }
+    return CVCam::CreateInstance(lpunk, phr);
+}
 
-// Array of factory function pointers
-static LPFNNewCOMObject g_CameraFactories[] = {
-    CreateCamera0,  CreateCamera1,  CreateCamera2,  CreateCamera3,
-    CreateCamera4,  CreateCamera5,  CreateCamera6,  CreateCamera7,
-    CreateCamera8,  CreateCamera9,  CreateCamera10, CreateCamera11,
-    CreateCamera12, CreateCamera13, CreateCamera14, CreateCamera15
-};
+CUnknown * WINAPI CreateCameraInstance5(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (5 < g_FactoryIndexToCameraName.size()) {
+        std::string cameraName = g_FactoryIndexToCameraName[5];
+        auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+        auto camera = manager->GetCamera(cameraName);
+        if (camera) {
+            return CVCam::CreateCameraInstance(lpunk, phr, camera->clsid);
+        }
+    }
+    return CVCam::CreateInstance(lpunk, phr);
+}
 
-// Array of property page factory function pointers
-static LPFNNewCOMObject g_PropertyPageFactories[] = {
-    CreatePropertyPage0,  CreatePropertyPage1,  CreatePropertyPage2,  CreatePropertyPage3,
-    CreatePropertyPage4,  CreatePropertyPage5,  CreatePropertyPage6,  CreatePropertyPage7,
-    CreatePropertyPage8,  CreatePropertyPage9,  CreatePropertyPage10, CreatePropertyPage11,
-    CreatePropertyPage12, CreatePropertyPage13, CreatePropertyPage14, CreatePropertyPage15
-};
+CUnknown * WINAPI CreateCameraInstance6(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (6 < g_FactoryIndexToCameraName.size()) {
+        std::string cameraName = g_FactoryIndexToCameraName[6];
+        auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+        auto camera = manager->GetCamera(cameraName);
+        if (camera) {
+            return CVCam::CreateCameraInstance(lpunk, phr, camera->clsid);
+        }
+    }
+    return CVCam::CreateInstance(lpunk, phr);
+}
 
-// Initialize templates dynamically
+CUnknown * WINAPI CreateCameraInstance7(LPUNKNOWN lpunk, HRESULT *phr) {
+    if (7 < g_FactoryIndexToCameraName.size()) {
+        std::string cameraName = g_FactoryIndexToCameraName[7];
+        auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+        auto camera = manager->GetCamera(cameraName);
+        if (camera) {
+            return CVCam::CreateCameraInstance(lpunk, phr, camera->clsid);
+        }
+    }
+    return CVCam::CreateInstance(lpunk, phr);
+}
+
+// Dynamic template initialization - creates templates for all active cameras
 void InitializeTemplates() {
-    InitializeFilterSetups();
-    
     g_cTemplates = 0;
     
-    // Create templates for each camera and its property page
-    for (size_t i = 0; i < g_DynamicCameraConfigs.size() && i < 16; i++) {
-        // Camera template
-        g_Templates[g_cTemplates].m_Name = CameraNames[i].c_str();
-        g_Templates[g_cTemplates].m_ClsID = &g_DynamicCameraConfigs[i].clsid;
-        g_Templates[g_cTemplates].m_lpfnNew = g_CameraFactories[i];
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    manager->LoadCamerasFromRegistry();
+    auto cameras = manager->GetAllCameras();
+    
+    // Create templates for ALL cameras (not just active ones)
+    // This ensures DirectShow can instantiate any registered camera
+    int cameraIndex = 0;
+    for (auto* camera : cameras) {
+        // Store CLSID to camera name mapping
+        g_CLSIDToCameraName[camera->clsid] = camera->name;
+        
+        // Camera filter template with individual factory function
+        g_Templates[g_cTemplates].m_Name = new WCHAR[256];
+        MultiByteToWideChar(CP_ACP, 0, camera->name.c_str(), -1, 
+                           const_cast<WCHAR*>(g_Templates[g_cTemplates].m_Name), 256);
+        g_Templates[g_cTemplates].m_ClsID = &camera->clsid;
+        
+        // Assign individual camera factory function based on camera index
+        if (cameraIndex < 8) {
+            g_Templates[g_cTemplates].m_lpfnNew = g_CameraFactoryFunctions[cameraIndex];
+        } else {
+            g_Templates[g_cTemplates].m_lpfnNew = CVCam::CreateInstance;
+        }
+        
         g_Templates[g_cTemplates].m_lpfnInit = nullptr;
-        g_Templates[g_cTemplates].m_pAMovieSetup_Filter = &AMSFilters[i];
+        g_Templates[g_cTemplates].m_pAMovieSetup_Filter = &AMSFilterVCam;
         g_cTemplates++;
         
-        // Property page template
-        g_Templates[g_cTemplates].m_Name = L"Settings";
-        g_Templates[g_cTemplates].m_ClsID = &g_DynamicCameraConfigs[i].propPageClsid;
-        g_Templates[g_cTemplates].m_lpfnNew = g_PropertyPageFactories[i];
+        // Property page template with camera-specific factory index
+        g_Templates[g_cTemplates].m_Name = new WCHAR[256];
+        swprintf_s(const_cast<WCHAR*>(g_Templates[g_cTemplates].m_Name), 256, 
+                  L"%S Settings", camera->name.c_str());
+        g_Templates[g_cTemplates].m_ClsID = &camera->propPageClsid;
+        
+        // Ensure the camera name is in the factory index array (add once per camera)
+        if (cameraIndex >= (int)g_FactoryIndexToCameraName.size()) {
+            g_FactoryIndexToCameraName.push_back(camera->name);
+        }
+        
+        // Use the specific factory function for this camera index
+        if (cameraIndex < 8) { // We have 8 predefined factory functions
+            g_Templates[g_cTemplates].m_lpfnNew = g_PropertyPageFactoryFunctions[cameraIndex];
+        } else {
+            // Fall back to generic factory for cameras beyond index 7
+            g_Templates[g_cTemplates].m_lpfnNew = CreatePropertyPageInstance;
+        }
         g_Templates[g_cTemplates].m_lpfnInit = nullptr;
         g_Templates[g_cTemplates].m_pAMovieSetup_Filter = nullptr;
+        
+        // Store CLSID to camera name mapping for property pages
+        g_PropPageCLSIDToCameraName[camera->propPageClsid] = camera->name;
+        
         g_cTemplates++;
+        
+        // Move to next camera
+        cameraIndex++;
+    }
+    
+    // If no cameras are active, create a default SpoutCam entry
+    if (g_cTemplates == 0) {
+        auto defaultCamera = manager->CreateCamera("SpoutCam");
+        if (defaultCamera) {
+            manager->SetCameraActive("SpoutCam", true);
+            
+            // Store CLSID to camera name mapping
+            g_CLSIDToCameraName[defaultCamera->clsid] = defaultCamera->name;
+            
+            g_Templates[g_cTemplates].m_Name = L"SpoutCam";
+            g_Templates[g_cTemplates].m_ClsID = &defaultCamera->clsid;
+            g_Templates[g_cTemplates].m_lpfnNew = CVCam::CreateInstance;
+            g_Templates[g_cTemplates].m_lpfnInit = nullptr;
+            g_Templates[g_cTemplates].m_pAMovieSetup_Filter = &AMSFilterVCam;
+            g_cTemplates++;
+            
+            g_Templates[g_cTemplates].m_Name = L"SpoutCam Settings";
+            g_Templates[g_cTemplates].m_ClsID = &defaultCamera->propPageClsid;
+            g_Templates[g_cTemplates].m_lpfnNew = CreatePropertyPageInstance;
+            
+            // Store mapping for default camera too
+            g_PropPageCLSIDToCameraName[defaultCamera->propPageClsid] = defaultCamera->name;
+            g_Templates[g_cTemplates].m_lpfnInit = nullptr;
+            g_Templates[g_cTemplates].m_pAMovieSetup_Filter = nullptr;
+            g_cTemplates++;
+        }
     }
 }
 
@@ -385,9 +754,20 @@ STDAPI RegisterCameraByName(const char* cameraName)
             rf2.cPins = 1;
             rf2.rgPins = &AMSPinVCam;
             
+            // CRITICAL FIX: Register each camera with its unique CLSID in DirectShow category
+            // This ensures each camera appears as a separate video device
             hr = fm->RegisterFilter(camera->clsid, wideCameraName, &pMoniker, &CLSID_VideoInputDeviceCategory, NULL, &rf2);
-            printf("RegisterCameraByName: RegisterFilter returned 0x%08X (%s)\n", 
-                hr, SUCCEEDED(hr) ? "SUCCESS" : "FAILED");
+            printf("RegisterCameraByName: DirectShow RegisterFilter returned 0x%08X for camera '%s'\n", hr, cameraName);
+            
+            // Also do manual instance-only registration for better visibility
+            HRESULT hrManual = RegisterCameraInstanceOnly(camera->clsid, wideCameraName);
+            printf("RegisterCameraByName: Manual instance registration returned 0x%08X for camera '%s'\n", hrManual, cameraName);
+            
+            if (SUCCEEDED(hr)) {
+                printf("RegisterCameraByName: Camera '%s' successfully registered as separate DirectShow device\n", cameraName);
+            } else {
+                printf("RegisterCameraByName: Failed to register camera '%s' in DirectShow category\n", cameraName);
+            }
             
             fm->Release();
         }
@@ -443,9 +823,20 @@ STDAPI UnregisterCameraByName(const char* cameraName)
     printf("UnregisterCameraByName: CoCreateInstance(FilterMapper2) returned 0x%08X\n", hrFilter);
     
     if (SUCCEEDED(hrFilter)) {
+        // CRITICAL FIX: Unregister from DirectShow category using the camera's unique CLSID
         hrFilter = fm->UnregisterFilter(&CLSID_VideoInputDeviceCategory, 0, camera->clsid);
-        printf("UnregisterCameraByName: UnregisterFilter returned 0x%08X (%s)\n", 
-            hrFilter, SUCCEEDED(hrFilter) ? "SUCCESS" : "FAILED");
+        printf("UnregisterCameraByName: DirectShow UnregisterFilter returned 0x%08X for camera '%s'\n", hrFilter, cameraName);
+        
+        // Also do manual instance-only unregistration
+        HRESULT hrManual = UnregisterCameraInstanceOnly(camera->clsid);
+        printf("UnregisterCameraByName: Manual instance unregistration returned 0x%08X for camera '%s'\n", hrManual, cameraName);
+        
+        if (SUCCEEDED(hrFilter)) {
+            printf("UnregisterCameraByName: Camera '%s' successfully unregistered from DirectShow\n", cameraName);
+        } else {
+            printf("UnregisterCameraByName: Failed to unregister camera '%s' from DirectShow category\n", cameraName);
+        }
+        
         fm->Release();
     }
     
@@ -589,18 +980,79 @@ HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )
     return hr;
 }
 
+// Register only the primary SpoutCam filter - virtual cameras handled at runtime
+HRESULT RegisterPrimaryCameraFilter( BOOL bRegister )
+{
+	ASSERT(g_hInst != 0);
+    HRESULT hr = NOERROR;
+    WCHAR achFileName[MAX_PATH];
+	
+	if (0 == GetModuleFileNameW(g_hInst, achFileName, MAX_PATH))
+	{
+		return AmHresultFromWin32(GetLastError());
+	}
+
+    hr = CoInitialize(0);
+    
+    if(bRegister)
+    {
+        // Use base SpoutCam CLSID - only register one entry point
+        // Virtual cameras will be handled through runtime configuration
+        hr = AMovieSetupRegisterServer(CLSID_SpoutCam_Primary, L"SpoutCam", achFileName, L"Both", L"InprocServer32");
+        
+        if (SUCCEEDED(hr)) {
+            // Register single property page
+            hr = AMovieSetupRegisterServer(CLSID_SpoutCam_PropPage_Primary, L"SpoutCam Settings", achFileName, L"Both", L"InprocServer32");
+        }
+    }
+    else
+    {
+        // Unregister only the primary CLSIDs
+        AMovieSetupUnregisterServer(CLSID_SpoutCam_Primary);
+        AMovieSetupUnregisterServer(CLSID_SpoutCam_PropPage_Primary);
+    }
+
+    // Also need to register/unregister in DirectShow VideoInputDeviceCategory
+    if( SUCCEEDED(hr) )
+    {
+        IFilterMapper2 *fm = 0;
+        hr = CoCreateInstance(CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER, IID_IFilterMapper2, (void **)&fm);
+        
+        if (SUCCEEDED(hr)) {
+            if (bRegister) {
+                IMoniker *pMoniker = 0;
+                REGFILTER2 rf2;
+                rf2.dwVersion = 1;
+                rf2.dwMerit = MERIT_DO_NOT_USE;
+                rf2.cPins = 1;
+                rf2.rgPins = &AMSPinVCam;
+                
+                hr = fm->RegisterFilter(CLSID_SpoutCam_Primary, L"SpoutCam", &pMoniker, &CLSID_VideoInputDeviceCategory, NULL, &rf2);
+            } else {
+                hr = fm->UnregisterFilter(&CLSID_VideoInputDeviceCategory, 0, CLSID_SpoutCam_Primary);
+            }
+            fm->Release();
+        }
+    }
+
+    CoFreeUnusedLibraries();
+    CoUninitialize();
+    return hr;
+}
+
 // This function will be called by a set-up application, or when the user runs the Regsvr32.exe tool.
 // see http://msdn.microsoft.com/en-us/library/windows/desktop/dd376682%28v=vs.85%29.aspx
 STDAPI DllRegisterServer()
 {
-	// Register only the first camera by default for backward compatibility
-	// Additional cameras can be registered individually through the properties dialog
-	return RegisterSingleCameraFilter(TRUE, 0);
+	// Register only one primary SpoutCam filter - virtual cameras handled at runtime
+	// This avoids multiple CLSID registrations in VideoInputDeviceCategory
+	return RegisterPrimaryCameraFilter(TRUE);
 }
 
 STDAPI DllUnregisterServer()
 {
-	return RegisterFilters(FALSE);
+	// Unregister only the primary SpoutCam filter
+	return RegisterPrimaryCameraFilter(FALSE);
 }
 
 // External functions for single camera registration
@@ -612,6 +1064,90 @@ extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE RegisterSingleSpoutCamer
 extern "C" __declspec(dllexport) HRESULT STDAPICALLTYPE UnregisterSingleSpoutCamera(int cameraIndex)
 {
     return RegisterSingleCameraFilter(FALSE, cameraIndex);
+}
+
+// Manual Instance-only registration functions
+HRESULT RegisterCameraInstanceOnly(const GUID& instanceGuid, const WCHAR* friendlyName)
+{
+    HKEY hDeviceKey = NULL;
+    HKEY hInstanceKey = NULL;
+    HRESULT hr = E_FAIL;
+    
+    // Open Video Input Device Category key
+    WCHAR deviceCategoryPath[] = L"SOFTWARE\\Classes\\CLSID\\{860BB310-5D01-11d0-BD3B-00A0C911CE86}\\Instance";
+    
+    LONG result = RegOpenKeyExW(HKEY_LOCAL_MACHINE, deviceCategoryPath, 0, KEY_CREATE_SUB_KEY, &hDeviceKey);
+    if (result != ERROR_SUCCESS) {
+        printf("RegisterCameraInstanceOnly: Failed to open device category key: %ld\n", result);
+        return HRESULT_FROM_WIN32(result);
+    }
+    
+    // Create Instance subkey using camera's unique GUID
+    WCHAR instanceGuidStr[64];
+    StringFromGUID2(instanceGuid, instanceGuidStr, ARRAYSIZE(instanceGuidStr));
+    
+    result = RegCreateKeyExW(hDeviceKey, instanceGuidStr, 0, NULL, REG_OPTION_NON_VOLATILE, 
+                            KEY_SET_VALUE, NULL, &hInstanceKey, NULL);
+    if (result == ERROR_SUCCESS) {
+        // Set FriendlyName
+        result = RegSetValueExW(hInstanceKey, L"FriendlyName", 0, REG_SZ, 
+                               (BYTE*)friendlyName, (DWORD)((wcslen(friendlyName) + 1) * sizeof(WCHAR)));
+        
+        if (result == ERROR_SUCCESS) {
+            // Set CLSID to the specific instance's unique CLSID (NOT shared)
+            WCHAR instanceClsidStr[64];
+            StringFromGUID2(instanceGuid, instanceClsidStr, ARRAYSIZE(instanceClsidStr));
+            result = RegSetValueExW(hInstanceKey, L"CLSID", 0, REG_SZ,
+                                   (BYTE*)instanceClsidStr, (DWORD)((wcslen(instanceClsidStr) + 1) * sizeof(WCHAR)));
+            
+            if (result == ERROR_SUCCESS) {
+                hr = S_OK;
+                printf("RegisterCameraInstanceOnly: Successfully registered '%ls' as instance %ls\n", 
+                       friendlyName, instanceGuidStr);
+            } else {
+                printf("RegisterCameraInstanceOnly: Failed to set CLSID: %ld\n", result);
+            }
+        } else {
+            printf("RegisterCameraInstanceOnly: Failed to set FriendlyName: %ld\n", result);
+        }
+        
+        RegCloseKey(hInstanceKey);
+    } else {
+        printf("RegisterCameraInstanceOnly: Failed to create instance key: %ld\n", result);
+    }
+    
+    RegCloseKey(hDeviceKey);
+    return hr;
+}
+
+HRESULT UnregisterCameraInstanceOnly(const GUID& instanceGuid)
+{
+    HKEY hDeviceKey = NULL;
+    HRESULT hr = E_FAIL;
+    
+    // Open Video Input Device Category key
+    WCHAR deviceCategoryPath[] = L"SOFTWARE\\Classes\\CLSID\\{860BB310-5D01-11d0-BD3B-00A0C911CE86}\\Instance";
+    
+    LONG result = RegOpenKeyExW(HKEY_LOCAL_MACHINE, deviceCategoryPath, 0, KEY_SET_VALUE, &hDeviceKey);
+    if (result != ERROR_SUCCESS) {
+        printf("UnregisterCameraInstanceOnly: Failed to open device category key: %ld\n", result);
+        return HRESULT_FROM_WIN32(result);
+    }
+    
+    // Delete Instance subkey
+    WCHAR instanceGuidStr[64];
+    StringFromGUID2(instanceGuid, instanceGuidStr, ARRAYSIZE(instanceGuidStr));
+    
+    result = RegDeleteKeyW(hDeviceKey, instanceGuidStr);
+    if (result == ERROR_SUCCESS) {
+        hr = S_OK;
+        printf("UnregisterCameraInstanceOnly: Successfully unregistered instance %ls\n", instanceGuidStr);
+    } else {
+        printf("UnregisterCameraInstanceOnly: Failed to delete instance key %ls: %ld\n", instanceGuidStr, result);
+    }
+    
+    RegCloseKey(hDeviceKey);
+    return hr;
 }
 
 // External function to get the name that will be used for a camera index

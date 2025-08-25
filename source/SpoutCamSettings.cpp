@@ -53,6 +53,11 @@ bool DeactivateCameraByName(const std::string& cameraName);
 void OpenCameraPropertiesByName(const std::string& cameraName);
 bool CreateNewCamera(const char* name);
 bool RemoveCameraByName(const std::string& cameraName);
+bool RegisterCamera(const char* cameraName);
+bool UnregisterCamera(const char* cameraName);  
+void OpenCameraProperties(const char* cameraName);
+
+// Legacy index-based wrappers
 bool RegisterLegacyCamera(int cameraIndex);
 bool UnregisterLegacyCamera(int cameraIndex);  
 void OpenLegacyCameraProperties(int cameraIndex);
@@ -65,8 +70,12 @@ bool WriteStringToRegistry(HKEY hKey, const char* subkey, const char* valuename,
 bool WriteBinaryToRegistry(HKEY hKey, const char* subkey, const char* valuename, const BYTE* data, DWORD dataSize);
 void DeleteCameraConfiguration(const char* cameraName);
 void DeleteLegacyCameraConfiguration(int cameraIndex);
-bool IsCameraActive(int cameraIndex);
-bool HasCameraSettings(int cameraIndex);
+bool IsCameraActive(const char* cameraName);
+bool HasCameraSettings(const char* cameraName);
+
+// Legacy index-based wrappers for backward compatibility
+bool IsCameraActiveByIndex(int cameraIndex);
+bool HasCameraSettingsByIndex(int cameraIndex);
 std::string GenerateDefaultCameraName();
 
 // Camera creation result codes
@@ -401,6 +410,30 @@ bool IsCameraActive(int cameraIndex)
     return false;
 }
 
+// New name-based version
+bool IsCameraActive(const char* cameraName)
+{
+    if (!cameraName) return false;
+    
+    // Use the DynamicCameraManager to check if camera is active
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    return manager->IsCameraActive(cameraName);
+}
+
+// Legacy wrapper that converts index to name
+bool IsCameraActiveByIndex(int cameraIndex)
+{
+    // Convert index to camera name using legacy naming convention
+    char cameraName[32];
+    if (cameraIndex == 0) {
+        strcpy_s(cameraName, "SpoutCam");
+    } else {
+        sprintf_s(cameraName, "SpoutCam%d", cameraIndex + 1);
+    }
+    
+    return IsCameraActive(cameraName);
+}
+
 bool HasCameraSettings(int cameraIndex) 
 {
     char keyName[256];
@@ -414,11 +447,35 @@ bool HasCameraSettings(int cameraIndex)
     }
     
     // Check if any settings exist
-    bool hasFps = ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "fps", &testValue);
-    bool hasResolution = ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "resolution", &testValue);
-    bool hasMirror = ReadDwordFromRegistry(HKEY_CURRENT_USER, keyName, "mirror", &testValue);
+    bool hasFps = ReadDwordFromRegistry(HKEY_LOCAL_MACHINE, keyName, "fps", &testValue);
+    bool hasResolution = ReadDwordFromRegistry(HKEY_LOCAL_MACHINE, keyName, "resolution", &testValue);
+    bool hasMirror = ReadDwordFromRegistry(HKEY_LOCAL_MACHINE, keyName, "mirror", &testValue);
     
     return (hasFps || hasResolution || hasMirror);
+}
+
+// New name-based version
+bool HasCameraSettings(const char* cameraName)
+{
+    if (!cameraName) return false;
+    
+    // Use the DynamicCameraManager to check if camera has settings
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    return manager->CameraHasSettings(cameraName);
+}
+
+// Legacy wrapper that converts index to name
+bool HasCameraSettingsByIndex(int cameraIndex)
+{
+    // Convert index to camera name using legacy naming convention
+    char cameraName[32];
+    if (cameraIndex == 0) {
+        strcpy_s(cameraName, "SpoutCam");
+    } else {
+        sprintf_s(cameraName, "SpoutCam%d", cameraIndex + 1);
+    }
+    
+    return HasCameraSettings(cameraName);
 }
 
 // Generate the next available default camera name using dynamic system
@@ -1308,10 +1365,7 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                     }
                                 }
                                 
-                                // Clear and reload manager to reflect deletions
-                                SpoutCam::DynamicCameraManager::Cleanup();
-                                
-                                // Force refresh to show updated status
+                                // Force refresh to show updated status (RefreshCameraList handles cleanup internally)
                                 g_filtersScanned = false;
                                 RefreshCameraList(hListView);
                                 

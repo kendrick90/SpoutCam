@@ -344,20 +344,32 @@ static uint32_t xorshiftRand()
 //////////////////////////////////////////////////////////////////////////
 //  CVCam is the source filter which masquerades as a capture device
 //////////////////////////////////////////////////////////////////////////
+
 CUnknown * WINAPI CVCam::CreateInstance(LPUNKNOWN lpunk, HRESULT *phr)
 {
-    // This is the default instance - use default SpoutCam camera
-    // Avoid expensive GetAllCameras() call during filter instantiation
+    // This is the default factory - should only create the default SpoutCam camera
+    // Other cameras are created through their specific CLSIDs via CreateCameraInstance
+    ASSERT(phr);
+    *phr = S_OK;
+    
     auto manager = SpoutCam::DynamicCameraManager::GetInstance();
-    auto camera = manager->GetCamera("SpoutCam");
-    if (camera) {
-        return CreateCameraInstance(lpunk, phr, camera->clsid);
+    manager->LoadCamerasFromRegistry(); // Ensure cameras are loaded
+    
+    // Create or get the default "SpoutCam" camera
+    auto defaultCamera = manager->GetCamera("SpoutCam");
+    if (!defaultCamera) {
+        defaultCamera = manager->CreateCamera("SpoutCam");
+        if (defaultCamera) {
+            manager->SetCameraActive("SpoutCam", true);
+        }
     }
     
-    // Fallback: create default camera if none exists
-    camera = manager->CreateCamera("SpoutCam");
-    if (camera) {
-        return CreateCameraInstance(lpunk, phr, camera->clsid);
+    if (defaultCamera) {
+        CVCam *pNewObject = new CVCam(lpunk, phr, defaultCamera->clsid);
+        if (pNewObject == nullptr) {
+            *phr = E_OUTOFMEMORY;
+        }
+        return pNewObject;
     }
     
     *phr = E_FAIL;
@@ -367,6 +379,7 @@ CUnknown * WINAPI CVCam::CreateInstance(LPUNKNOWN lpunk, HRESULT *phr)
 CUnknown * WINAPI CVCam::CreateCameraInstance(LPUNKNOWN lpunk, HRESULT *phr, REFCLSID clsid)
 {
     ASSERT(phr);
+    *phr = NOERROR;
 
 	// Console window
 	// OpenSpoutConsole(); // Empty console
@@ -377,9 +390,26 @@ CUnknown * WINAPI CVCam::CreateCameraInstance(LPUNKNOWN lpunk, HRESULT *phr, REF
 	// For clear options dialog for scaled display
 	SetProcessDPIAware();
 
-    CUnknown *punk = new CVCam(lpunk, phr, clsid);
-
-    return punk;
+    // Find the camera by CLSID - ensure registry is loaded first
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    manager->LoadCamerasFromRegistry(); // CRITICAL: Load cameras before lookup
+    auto camera = manager->GetCameraByCLSID(clsid);
+    
+    if (camera) {
+        CUnknown *punk = new CVCam(lpunk, phr, clsid);  // Use original CLSID constructor
+        if (!punk) {
+            *phr = E_OUTOFMEMORY;
+        }
+        return punk;
+    }
+    
+    // If specific camera not found, this might be a request for default camera
+    if (IsEqualCLSID(clsid, CLSID_SpoutCam)) {
+        return CVCam::CreateInstance(lpunk, phr);
+    }
+    
+    *phr = E_FAIL;
+    return nullptr;
 }
 
 // Dynamic factory function - no longer need individual factories
@@ -420,7 +450,7 @@ CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr) :
 CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr, REFCLSID clsid) : 
 	CSource(NAME(SPOUTCAMNAME), lpunk, clsid)
 {
-    // Find camera by CLSID
+    // Find camera by CLSID - consistent for all cameras
     m_cameraConfig = FindCameraConfig(clsid);
     if (m_cameraConfig) {
         m_cameraName = m_cameraConfig->name;
@@ -442,6 +472,33 @@ CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr, REFCLSID clsid) :
 	m_paStreams[0] = new CVCamStream(phr, this, wideCameraName, m_cameraName);
 
 	if (phr) *phr = S_OK; //VS
+}
+
+CVCam::CVCam(LPUNKNOWN lpunk, HRESULT *phr, const std::string& cameraName) : 
+	CSource(NAME(SPOUTCAMNAME), lpunk, CLSID_SpoutCam_Primary)
+{
+    // Constructor with camera name - for single CLSID approach
+    auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+    
+    // Get or create the camera configuration
+    m_cameraConfig = manager->GetCamera(cameraName);
+    if (!m_cameraConfig) {
+        m_cameraConfig = manager->CreateCamera(cameraName);
+    }
+    
+    m_cameraName = cameraName;
+    
+    ASSERT(phr);
+    CAutoLock cAutoLock(&m_cStateLock);
+    
+    // Create the one and only output pin using the specified camera name
+    WCHAR wideCameraName[256];
+    MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, wideCameraName, 256);
+    
+    m_paStreams = (CSourceStream **)new CVCamStream*[1];
+	m_paStreams[0] = new CVCamStream(phr, this, wideCameraName, m_cameraName);
+
+	if (phr) *phr = S_OK;
 }
 
 // Retrieves pointers to the supported interfaces on an object.
@@ -651,8 +708,29 @@ HRESULT CVCamStream::put_Settings(DWORD dwFps, DWORD dwResolution, DWORD dwMirro
 	SetFps(dwFps);
 	SetResolution(dwResolution);
 
-	// The starting sender name
+	// The starting sender name - force reconnection if it changed
+	const char* newName = (name && strlen(name) > 0) ? name : "";
+	if (strcmp(m_SenderStart, newName) != 0) {
+		// Sender name has changed - force receiver to release current connection
+		// and reconnect to the new/active sender
+		printf("CVCamStream: Sender name changed from '%s' to '%s' - forcing reconnection\n", m_SenderStart, newName);
+		receiver.ReleaseReceiver();
+		strcpy_s(m_SenderStart, 256, newName);
+		bInitialized = false; // Force re-initialization with new sender
+	}
+	
+	// CRITICAL FIX: Set receiver name BEFORE any sender queries
+	// This ensures each camera instance connects to its own specified sender
 	receiver.SetReceiverName(name);
+	
+	// Also store the configured sender name for this camera instance
+	if (name && strlen(name) > 0) {
+		strcpy_s(m_ActiveSender, 256, name);
+		printf("CVCamStream: Camera '%s' configured to connect to sender '%s'\n", m_cameraName.c_str(), name);
+	} else {
+		m_ActiveSender[0] = 0;
+		printf("CVCamStream: Camera '%s' will connect to active sender\n", m_cameraName.c_str());
+	}
 
 	// Mirror and swap
 	receiver.SetMirror(dwMirror > 0);
@@ -676,11 +754,13 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName, const s
 	bMemoryMode		= false; // Default mode is texture, true means memoryshare
 	bInvert         = true;  // Flip vertically
 	bInitialized	= false; // Spoutcam receiver
-	g_Width			= 640;	 // give it an initial size - this will be changed if a sender is running at start
-	g_Height		= 480;
-	g_SenderName[0] = 0;
-	g_ActiveSender[0] = 0;
-	g_SenderStart[0] = 0;
+	
+	// Initialize per-instance resolution and sender settings
+	m_Width			= 640;	 // give it an initial size - this will be changed if a sender is running at start
+	m_Height		= 480;
+	m_SenderName[0] = 0;
+	m_ActiveSender[0] = 0;
+	m_SenderStart[0] = 0;
 
 	
 	/*
@@ -723,12 +803,8 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName, const s
 	//			60	5
 	//
 	
-	// Create camera-specific registry path
-	if (m_cameraName == "SpoutCam") {
-		strcpy_s(m_registryPath, 256, "Software\\Leading Edge\\SpoutCam");
-	} else {
-		sprintf_s(m_registryPath, 256, "Software\\Leading Edge\\SpoutCam\\%s", m_cameraName.c_str());
-	}
+	// Create camera-specific registry path - all cameras use consistent structure
+	sprintf_s(m_registryPath, 256, "Software\\Leading Edge\\SpoutCam\\%s", m_cameraName.c_str());
 	
 	// Fps from SpoutCamSettings (default 3 = 30)
 	if (!ReadDwordFromRegistry(HKEY_CURRENT_USER, m_registryPath, "fps", &dwFps)) {
@@ -787,8 +863,23 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName, const s
 	// A starting name flags waiting for the nominated sender.
 	// Each camera can have its own default sender.
 	//
-	g_SenderStart[0] = 0;
-	ReadPathFromRegistry(HKEY_CURRENT_USER, m_registryPath, "senderstart", g_SenderStart);
+	m_SenderStart[0] = 0;
+	
+	// CRITICAL FIX: Load sender name from DynamicCameraManager first (preferred)
+	auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+	auto cameraConfig = manager->GetCamera(m_cameraName);
+	if (cameraConfig && !cameraConfig->senderName.empty()) {
+		strcpy_s(m_SenderStart, 256, cameraConfig->senderName.c_str());
+		printf("CVCamStream: Loaded sender name '%s' from camera config for '%s'\n", m_SenderStart, m_cameraName.c_str());
+	} else {
+		// Fallback: read from legacy registry location
+		ReadPathFromRegistry(HKEY_CURRENT_USER, m_registryPath, "senderstart", m_SenderStart);
+		if (m_SenderStart[0] != 0) {
+			printf("CVCamStream: Loaded sender name '%s' from registry for '%s'\n", m_SenderStart, m_cameraName.c_str());
+		} else {
+			printf("CVCamStream: No specific sender configured for '%s', will use active sender\n", m_cameraName.c_str());
+		}
+	}
 
 	/*
 	printf("dwFps        = %d\n", dwFps);
@@ -796,18 +887,26 @@ CVCamStream::CVCamStream(HRESULT *phr, CVCam *pParent, LPCWSTR pPinName, const s
 	printf("dwMirror     = %d\n", dwMirror);
 	printf("dwFlip       = %d\n", dwFlip);
 	printf("dwSwap       = %d\n", dwSwap);
-	printf("senderstart  [%s]\n", g_SenderStart);
+	printf("senderstart  [%s]\n", m_SenderStart);
 	*/
 
 	//<==================== VS-START ====================>
 	// Now always the new function put_Settings is called, which in turn calls
 	// SetFps and SetResolution. Dealing with resolution 0 (Sender) was moved to
 	// SetResolution.
-	put_Settings(dwFps, dwResolution, dwMirror, dwSwap, dwFlip, g_SenderStart);
+	put_Settings(dwFps, dwResolution, dwMirror, dwSwap, dwFlip, m_SenderStart);
 	//<==================== VS-END ======================>
 
 	NumDroppedFrames = 0LL;
 	NumFrames = 0LL;
+	
+	// Initialize deferred registry write variables
+	m_pendingRegistryWrite = false;
+	m_pendingSenderName[0] = 0;
+	m_lastRegistryWriteTime = 0;
+	
+	// Initialize resolution change tracking
+	m_bFormatChanged = false;
 
 
 }
@@ -858,68 +957,106 @@ void CVCamStream::SetResolution(DWORD dwResolution)
 				// If there is no Sender, getmediatype will use the resolution set by the user
 				// Resolution index 0 means that the user has selected "Active sender"
 				// Use the resolution of the active sender if one is running
-				if (receiver.GetActiveSender(g_SenderName))
-				{
+				
+				// CRITICAL FIX: Check if this camera has a specific sender configured first
+				bool foundSender = false;
+				if (m_SenderStart[0] != 0) {
+					// Camera has a specific sender configured - use that
+					strcpy_s(m_SenderName, 256, m_SenderStart);
+					printf("CVCamStream::SetResolution: Using configured sender '%s' for camera '%s'\n", m_SenderName, m_cameraName.c_str());
+					foundSender = true;
+				} else {
+					// No specific sender - get active sender but make it unique per camera
+					if (receiver.GetActiveSender(m_SenderName)) {
+						// Append camera name to make sender selection unique per camera instance
+						// This prevents all cameras from connecting to the same sender
+						char uniqueSenderName[256];
+						snprintf(uniqueSenderName, 256, "%s_%s", m_SenderName, m_cameraName.c_str());
+						
+						// Check if this unique sender exists, otherwise fall back to original
+						unsigned int testWidth, testHeight;
+						HANDLE testHandle;
+						DWORD testFormat;
+						if (receiver.GetSenderInfo(uniqueSenderName, testWidth, testHeight, testHandle, testFormat)) {
+							strcpy_s(m_SenderName, 256, uniqueSenderName);
+							printf("CVCamStream::SetResolution: Using unique sender '%s' for camera '%s'\n", m_SenderName, m_cameraName.c_str());
+						} else {
+							printf("CVCamStream::SetResolution: Using active sender '%s' for camera '%s' (no unique sender found)\n", m_SenderName, m_cameraName.c_str());
+						}
+						foundSender = true;
+					}
+				}
+				
+				if (foundSender) {
 					unsigned int width, height;
 					HANDLE sharehandle;
 					DWORD format;
 
-					if (receiver.GetSenderInfo(g_SenderName, width, height, sharehandle, format))
+					if (receiver.GetSenderInfo(m_SenderName, width, height, sharehandle, format))
 					{
 						// If not fixed to the a selected resolution, use the sender width and height
 						// Width must be a multiple of 4
-						g_Width = (width/4)*4;
+						m_Width = (width/4)*4;
 						// Aspect ratio is not significantly affected
-						g_Height = height;
+						m_Height = height;
+						printf("CVCamStream::SetResolution: Set resolution to %dx%d from sender '%s'\n", m_Width, m_Height, m_SenderName);
+					} else {
+						printf("CVCamStream::SetResolution: Failed to get info for sender '%s', using default 640x480\n", m_SenderName);
+						m_Width = 640;
+						m_Height = 480;
 					}
+				} else {
+					printf("CVCamStream::SetResolution: No sender found, using default 640x480\n");
+					m_Width = 640;
+					m_Height = 480;
 				}
 			}
 			break;
 		//<==================== VS-END ======================>
 
 		case 1 :
-			g_Width  = 320; // 1 
-			g_Height = 240;
+			m_Width  = 320; // 1 
+			m_Height = 240;
 			break;
 		case 2 :
-			g_Width  = 640; // 2
-			g_Height = 360;
+			m_Width  = 640; // 2
+			m_Height = 360;
 			break;
 		case 3 :
-			g_Width  = 640; // 3 (default)
-			g_Height = 480;
+			m_Width  = 640; // 3 (default)
+			m_Height = 480;
 			break;
 		case 4 :
-			g_Width  = 800; // 4
-			g_Height = 600;
+			m_Width  = 800; // 4
+			m_Height = 600;
 			break;
 		case 5 :
-			g_Width  = 1024; // 5
-			g_Height = 720;
+			m_Width  = 1024; // 5
+			m_Height = 720;
 			break;
 		case 6 :
-			g_Width  = 1024; // 6
-			g_Height = 768;
+			m_Width  = 1024; // 6
+			m_Height = 768;
 			break;
 		case 7 :
-			g_Width  = 1280; // 7
-			g_Height = 720;
+			m_Width  = 1280; // 7
+			m_Height = 720;
 			break;
 		case 8 :
-			g_Width  = 1280; // 8
-			g_Height = 960;
+			m_Width  = 1280; // 8
+			m_Height = 960;
 			break;
 		case 9 :
-			g_Width  = 1280; // 9
-			g_Height = 1024;
+			m_Width  = 1280; // 9
+			m_Height = 1024;
 			break;
 		case 10 :
-			g_Width  = 1920; // 10
-			g_Height = 1080;
+			m_Width  = 1920; // 10
+			m_Height = 1080;
 			break;
 		default :
-			g_Width  = 640; // 3 (default)
-			g_Height = 480;
+			m_Width  = 640; // 3 (default)
+			m_Height = 480;
 			break;
 	}
 }
@@ -1061,12 +1198,27 @@ HRESULT CVCamStream::FillBuffer(IMediaSample *pms)
 		return NOERROR;
 	}
 
-	// Sizes should be OK, but check again
+	// CRITICAL FIX: Handle buffer size mismatches due to resolution changes
 	unsigned int size = (unsigned int)pms->GetSize();
-	// TODO : check imagesize = width*height*3;
-	if(size != imagesize) { // imagesize retrieved above
-		ReleaseCamReceiver();
-		goto ShowStatic;
+	unsigned int expectedSize = width * height * 3; // 24-bit RGB
+	
+	// Check if buffer size doesn't match expected size
+	if (size != imagesize && size != expectedSize) {
+		// If we're in active sender mode and resolution has changed, this is expected
+		DWORD currentResolutionMode = 3;
+		ReadDwordFromRegistry(HKEY_CURRENT_USER, m_registryPath, "resolution", &currentResolutionMode);
+		
+		if (currentResolutionMode == 0) { // Active sender mode
+			printf("CVCamStream::FillBuffer: Buffer size mismatch in active sender mode - continuing with available buffer\n");
+			printf("  Buffer size: %u, Expected: %u, Image size: %u, Dimensions: %ux%u\n", 
+				size, expectedSize, imagesize, width, height);
+			// Continue processing - ReceiveImage will handle resampling
+		} else {
+			// Fixed resolution mode - this is an error
+			printf("CVCamStream::FillBuffer: Buffer size mismatch in fixed resolution mode - showing static\n");
+			ReleaseCamReceiver();
+			goto ShowStatic;
+		}
 	}
 
 	// Initialize DirectX if is has not been done
@@ -1079,11 +1231,11 @@ HRESULT CVCamStream::FillBuffer(IMediaSample *pms)
 	} // endif !bDXinitialized
 	
 	// Is anything running at all ?
-	if (!receiver.GetActiveSender(g_ActiveSender)) {
+	if (!receiver.GetActiveSender(m_ActiveSender)) {
 		// Quit now if a starting sender has started but
 		// has now closed. Wait for it to open again.
 		// The last frame is frozen instead of showing static.
-		if (bInitialized && g_SenderStart[0]) {
+		if (bInitialized && m_SenderStart[0]) {
 			return NOERROR;
 		}
 		// Otherwise release and show static
@@ -1092,31 +1244,55 @@ HRESULT CVCamStream::FillBuffer(IMediaSample *pms)
 	}
 
 
+	// No complex state management needed for silent approach
+	DWORD currentTime = timeGetTime();
+	
+	// DISABLED: Periodic resolution checks disabled to prevent hanging issues
+	// static DWORD lastResolutionCheck = 0;
+	// if (ShouldCheckResolutionChanges() && (currentTime - lastResolutionCheck > 1000)) {
+	//     // Periodic resolution change handling disabled
+	// }
+	
 	// DirectX is initialized OK
 	// Get bgr pixels from the sender bgra shared texture
 	// 16 bit or floating point textures not supported
 	// ReceiveImage handles sender detection, connection and copy of pixels
-	if (receiver.ReceiveImage(pData, g_Width, g_Height, true, bInvert)) {
+	if (receiver.ReceiveImage(pData, m_Width, m_Height, true, bInvert)) {
 		// bRGB = true : set rgb(i.e. not rgba data), bInvert = true : flip user setting
 		// If IsUpdated() returns true, the sender has changed
 		if (receiver.IsUpdated()) {
-			if (strcmp(g_SenderName, receiver.GetSenderName()) != 0) {
-				// Only test for change of sender name.
-				// The pixel buffer (pData) remains the same size and 
-				// ReceiveImage uses resampling for a different texture size
-				strcpy_s(g_SenderName, 256, receiver.GetSenderName());
-				// Set the sender name to the registry for SpoutCamSettings
-				WritePathToRegistry(HKEY_CURRENT_USER, m_registryPath, "sendername", g_SenderName);
+			// Check for sender name change only - resolution changes disabled
+			if (strcmp(m_SenderName, receiver.GetSenderName()) != 0) {
+				strcpy_s(m_SenderName, 256, receiver.GetSenderName());
+				printf("CVCamStream::FillBuffer: Sender changed to '%s' for camera '%s'\n", m_SenderName, m_cameraName.c_str());
+				
+				// PERFORMANCE: Defer registry write to avoid blocking video pipeline
+				m_pendingRegistryWrite = true;
+				strcpy_s(m_pendingSenderName, 256, m_SenderName);
 			}
+			
+			// DISABLED: Dynamic resolution changes disabled to prevent hanging issues
+			// SpoutCam will use the initial resolution and not change it on-the-fly
 		}
 		
 		bInitialized = true;
 		NumFrames++;
+		
+		// Perform deferred registry write if needed (but not too frequently)
+		if (m_pendingRegistryWrite) {
+			DWORD currentTime = timeGetTime();
+			if (currentTime - m_lastRegistryWriteTime > 500) { // Only write every 500ms max
+				WritePathToRegistry(HKEY_CURRENT_USER, m_registryPath, "sendername", m_pendingSenderName);
+				m_pendingRegistryWrite = false;
+				m_lastRegistryWriteTime = currentTime;
+			}
+		}
+		
 		return NOERROR;
 	}
 	else {
 		// Return if waiting for a starting sender that has closed.
-		if (bInitialized && g_SenderStart[0]) {
+		if (bInitialized && m_SenderStart[0]) {
 			return NOERROR;
 		}
 		// Release the receiver 
@@ -1146,6 +1322,60 @@ void CVCamStream::ReleaseCamReceiver()
 		bInitialized = false;
 	}
 }
+
+// Handle resolution changes for active sender mode
+HRESULT CVCamStream::HandleResolutionChange(unsigned int newWidth, unsigned int newHeight)
+{
+	// Ensure width is multiple of 4 for DirectShow compatibility
+	unsigned int adjustedWidth = (newWidth / 4) * 4;
+	
+	printf("CVCamStream::HandleResolutionChange: Changing resolution from %dx%d to %dx%d for camera '%s'\n", 
+		m_Width, m_Height, adjustedWidth, newHeight, m_cameraName.c_str());
+	
+	// Update internal dimensions
+	m_Width = adjustedWidth;
+	m_Height = newHeight;
+	
+	// Update the current media type
+	VIDEOINFOHEADER *pvi = (VIDEOINFOHEADER*)m_mt.Format();
+	if (pvi) {
+		pvi->bmiHeader.biWidth = (LONG)m_Width;
+		pvi->bmiHeader.biHeight = (LONG)m_Height;
+		pvi->bmiHeader.biSizeImage = GetBitmapSize(&pvi->bmiHeader);
+		
+		printf("CVCamStream::HandleResolutionChange: Updated media type - new image size: %ld bytes\n", 
+			pvi->bmiHeader.biSizeImage);
+	}
+	
+	// Just flag that format has changed - no complex state management needed
+	m_bFormatChanged = true;
+	
+	// COMPLETELY SILENT APPROACH: No notifications whatsoever - just internal updates
+	// Applications will discover the new resolution when they naturally query GetMediaType()
+	printf("CVCamStream::HandleResolutionChange: Resolution silently updated to %dx%d\n", m_Width, m_Height);
+	printf("CVCamStream::HandleResolutionChange: No notifications sent - completely passive\n");
+	
+	// No notifications, no events, no disruption to applications
+	HRESULT hr = S_OK;
+	
+	return hr;
+}
+
+// Check if we should monitor resolution changes for this camera
+bool CVCamStream::ShouldCheckResolutionChanges()
+{
+	// Only check resolution changes if:
+	// 1. Camera is in "Active Sender" resolution mode (dwResolution == 0)
+	// 2. Camera is initialized and receiving
+	// 3. We have a valid sender name to monitor
+	DWORD currentResolutionMode = 3;
+	ReadDwordFromRegistry(HKEY_LOCAL_MACHINE, m_registryPath, "resolution", &currentResolutionMode);
+	
+	return (currentResolutionMode == 0 && bInitialized && m_SenderName[0] != 0);
+}
+
+
+
 
 
 //
@@ -1186,15 +1416,55 @@ HRESULT CVCamStream::GetMediaType(int iPosition, CMediaType *pmt)
 	DECLARE_PTR(VIDEOINFOHEADER, pvi, pmt->AllocFormatBuffer(sizeof(VIDEOINFOHEADER)));
     ZeroMemory(pvi, sizeof(VIDEOINFOHEADER));
 
+ 	// CRITICAL FIX: Handle dynamic resolution for active sender mode
+	// Check if we're in active sender mode and should get current sender resolution
+	DWORD currentResolutionMode = 3; // Default to 640x480
+	ReadDwordFromRegistry(HKEY_LOCAL_MACHINE, m_registryPath, "resolution", &currentResolutionMode);
+	
+	if (currentResolutionMode == 0 && m_SenderStart[0] == 0) { // Active sender mode, no specific sender
+		// Try to get current active sender resolution in real-time
+		char activeSender[256];
+		if (receiver.GetActiveSender(activeSender)) {
+			unsigned int senderWidth, senderHeight;
+			HANDLE senderHandle;
+			DWORD senderFormat;
+			if (receiver.GetSenderInfo(activeSender, senderWidth, senderHeight, senderHandle, senderFormat)) {
+				// Update our dimensions with current sender
+				m_Width = (senderWidth / 4) * 4; // Ensure multiple of 4
+				m_Height = senderHeight;
+				printf("CVCamStream::GetMediaType: Updated to active sender resolution %dx%d for camera '%s'\n", 
+					m_Width, m_Height, m_cameraName.c_str());
+			}
+		}
+	} else if (currentResolutionMode == 0 && m_SenderStart[0] != 0) { // Specific sender mode
+		// Try to get specific sender resolution
+		unsigned int senderWidth, senderHeight;
+		HANDLE senderHandle;
+		DWORD senderFormat;
+		if (receiver.GetSenderInfo(m_SenderStart, senderWidth, senderHeight, senderHandle, senderFormat)) {
+			m_Width = (senderWidth / 4) * 4;
+			m_Height = senderHeight;
+			printf("CVCamStream::GetMediaType: Updated to specific sender '%s' resolution %dx%d for camera '%s'\n", 
+				m_SenderStart, m_Width, m_Height, m_cameraName.c_str());
+		}
+	}
+	
  	// Allow for default
-	if(g_Width == 0 || g_Height == 0) {
+	if(m_Width == 0 || m_Height == 0) {
 		width  = 640;
 		height = 480;
+		printf("CVCamStream::GetMediaType: Using default resolution 640x480 for camera '%s'\n", m_cameraName.c_str());
 	}
 	else {
-		// as per Spout sender received
-		width	=  g_Width;
-		height	=  g_Height;
+		// Use current dimensions (may have been updated above)
+		width	=  m_Width;
+		height	=  m_Height;
+	}
+	
+	// Clear the format changed flag now that we're providing the new format
+	if (m_bFormatChanged) {
+		m_bFormatChanged = false;
+		printf("CVCamStream::GetMediaType: Cleared format changed flag, providing new format %dx%d\n", width, height);
 	}
 
 	pvi->bmiHeader.biSize				= sizeof(BITMAPINFOHEADER);
@@ -1235,8 +1505,10 @@ HRESULT CVCamStream::GetMediaType(int iPosition, CMediaType *pmt)
 // This method is called to see if a given output format is supported
 HRESULT CVCamStream::CheckMediaType(const CMediaType *pMediaType)
 {
-	if(*pMediaType != m_mt) 
+	// Simple comparison with current media type - no aggressive updating
+	if(*pMediaType != m_mt) {
         return E_INVALIDARG;
+	}
 
     return S_OK;
 } // CheckMediaType
@@ -1335,14 +1607,14 @@ HRESULT STDMETHODCALLTYPE CVCamStream::GetStreamCaps(int iIndex, AM_MEDIA_TYPE *
 
 	if (iIndex == 0) iIndex = 1;
 
-	if(g_Width == 0 || g_Height == 0) {
+	if(m_Width == 0 || m_Height == 0) {
 		width  = 640;
 		height = 480;
 	}
 	else {
 		// as per sending app
-		width	=  g_Width;
-		height	=  g_Height;
+		width	=  m_Width;
+		height	=  m_Height;
 	}
 
 	pvi->bmiHeader.biCompression	= BI_RGB;
