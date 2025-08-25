@@ -1391,6 +1391,73 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     SetupConsole();
     LOG("SpoutCam Settings - Camera Management Interface\n");
     
+    // Check for command line arguments
+    if (lpCmdLine && strlen(lpCmdLine) > 0) {
+        LOG("Command line arguments: %s\n", lpCmdLine);
+        
+        // Check for cleanup argument
+        if (strstr(lpCmdLine, "--cleanup-all") != nullptr) {
+            LOG("Running in cleanup mode from command line...\n");
+            
+            // Perform the same cleanup as the UI cleanup button
+            int unregisterSuccessCount = 0;
+            int unregisterFailCount = 0;
+            int configDeletedCount = 0;
+            
+            LOG("Starting complete cleanup of all SpoutCam cameras and configurations...\n");
+            
+            // Unregister all 8 legacy cameras and delete their configurations
+            for (int i = 0; i < 8; i++) {
+                LOG("Cleaning up SpoutCam%d...\n", i + 1);
+                
+                // Unregister the camera
+                if (UnregisterLegacyCamera(i)) {
+                    unregisterSuccessCount++;
+                    LOG("SpoutCam%d unregistered successfully\n", i + 1);
+                } else {
+                    unregisterFailCount++;
+                    LOG("Failed to unregister SpoutCam%d\n", i + 1);
+                }
+                
+                // Delete the camera configuration
+                if (HasCameraSettings(i)) {
+                    DeleteLegacyCameraConfiguration(i);
+                    configDeletedCount++;
+                }
+            }
+            
+            // Also clean up all dynamic cameras and their settings
+            auto manager = SpoutCam::DynamicCameraManager::GetInstance();
+            auto dynamicCameras = manager->GetAllCameras();
+            for (auto camera : dynamicCameras) {
+                LOG("Cleaning up dynamic camera '%s'...\n", camera->name.c_str());
+                
+                // Unregister DirectShow filter if registered
+                if (camera->isRegistered) {
+                    if (UnregisterCameraByName(camera->name)) {
+                        unregisterSuccessCount++;
+                    } else {
+                        unregisterFailCount++;
+                    }
+                }
+                
+                // Delete all registry data for this camera
+                if (manager->DeleteCameraFromRegistry(camera->name)) {
+                    configDeletedCount++;
+                }
+            }
+            
+            // Clear and reload manager to reflect deletions
+            SpoutCam::DynamicCameraManager::Cleanup();
+            
+            LOG("Complete cleanup finished: %d unregistered, %d failed, %d configs deleted\n", 
+                unregisterSuccessCount, unregisterFailCount, configDeletedCount);
+            
+            // Return success/failure code
+            return (unregisterFailCount > 0) ? 1 : 0;
+        }
+    }
+    
     // Check if running as administrator
     if (!IsRunningAsAdmin()) {
         LOG("Requesting administrator privileges...\n");

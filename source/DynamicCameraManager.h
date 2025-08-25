@@ -53,6 +53,7 @@ public:
     DynamicCameraConfig* GetCameraByCLSID(const GUID& clsid);
     DynamicCameraConfig* GetCameraByPropPageCLSID(const GUID& propPageClsid);
     bool DeleteCamera(const std::string& cameraName);
+    bool UpdateCameraName(const std::string& oldName, const std::string& newName);
     
     // Get all cameras
     std::vector<DynamicCameraConfig*> GetAllCameras();

@@ -341,40 +341,79 @@ STDAPI RegisterCameraByName(const char* cameraName)
         camera->clsid.Data4[0], camera->clsid.Data4[1], camera->clsid.Data4[2], camera->clsid.Data4[3],
         camera->clsid.Data4[4], camera->clsid.Data4[5], camera->clsid.Data4[6], camera->clsid.Data4[7]);
     
-    // Find the camera index for compatibility with existing system
-    auto allCameras = manager->GetAllCameras();
-    for (int i = 0; i < (int)allCameras.size(); i++) {
-        if (allCameras[i] == camera) {
-            printf("RegisterCameraByName: Found camera at index %d, calling RegisterSingleCameraFilter\n", i);
-            HRESULT hr = RegisterSingleCameraFilter(TRUE, i);
-            printf("RegisterCameraByName: RegisterSingleCameraFilter returned 0x%08X (%s)\n", 
-                hr, SUCCEEDED(hr) ? "SUCCESS" : "FAILED");
-            return hr;
-        }
+    // Register camera and property page CLSIDs directly (no index needed)
+    WCHAR achFileName[MAX_PATH];
+    if (0 == GetModuleFileNameW(g_hInst, achFileName, MAX_PATH)) {
+        return AmHresultFromWin32(GetLastError());
     }
     
-    printf("RegisterCameraByName: ERROR - Could not find camera index\n");
-    return E_FAIL;
+    HRESULT hr = CoInitialize(0);
+    printf("RegisterCameraByName: CoInitialize returned 0x%08X\n", hr);
+    
+    // Convert camera name to wide string for registration
+    wchar_t wideCameraName[256];
+    MultiByteToWideChar(CP_ACP, 0, cameraName, -1, wideCameraName, 256);
+    
+    // Register camera CLSID directly 
+    printf("RegisterCameraByName: Registering camera CLSID for '%s'\n", cameraName);
+    hr = AMovieSetupRegisterServer(camera->clsid, wideCameraName, achFileName, L"Both", L"InprocServer32");
+    printf("RegisterCameraByName: Camera CLSID registration returned 0x%08X (%s)\n", 
+        hr, SUCCEEDED(hr) ? "SUCCESS" : "FAILED");
+        
+    if (SUCCEEDED(hr)) {
+        // Register property page CLSID
+        printf("RegisterCameraByName: Registering property page CLSID for '%s'\n", cameraName);
+        hr = AMovieSetupRegisterServer(camera->propPageClsid, L"Settings", achFileName, L"Both", L"InprocServer32");
+        printf("RegisterCameraByName: Property page CLSID registration returned 0x%08X (%s)\n", 
+            hr, SUCCEEDED(hr) ? "SUCCESS" : "FAILED");
+    }
+    
+    if (SUCCEEDED(hr)) {
+        // Mark camera as registered in manager
+        manager->SetCameraRegistered(cameraName, true);
+    }
+    
+    return hr;
 }
 
 STDAPI UnregisterCameraByName(const char* cameraName)
 {
+    printf("UnregisterCameraByName: Starting unregistration for camera '%s'\n", cameraName ? cameraName : "NULL");
+    
     if (!cameraName) return E_INVALIDARG;
     
     auto manager = SpoutCam::DynamicCameraManager::GetInstance();
-    auto camera = manager->GetCamera(cameraName);
-    
-    if (!camera) return E_FAIL;
-    
-    // Find the camera index for compatibility with existing system
-    auto allCameras = manager->GetAllCameras();
-    for (int i = 0; i < (int)allCameras.size(); i++) {
-        if (allCameras[i] == camera) {
-            return RegisterSingleCameraFilter(FALSE, i);
-        }
+    if (!manager) {
+        printf("UnregisterCameraByName: ERROR - Could not get DynamicCameraManager instance\n");
+        return E_FAIL;
     }
     
-    return E_FAIL;
+    auto camera = manager->GetCamera(cameraName);
+    if (!camera) {
+        printf("UnregisterCameraByName: ERROR - Camera '%s' not found in manager\n", cameraName);
+        return E_FAIL;
+    }
+    
+    HRESULT hr = CoInitialize(0);
+    printf("UnregisterCameraByName: CoInitialize returned 0x%08X\n", hr);
+    
+    // Unregister camera CLSID directly (no index needed)
+    printf("UnregisterCameraByName: Unregistering camera CLSID for '%s'\n", cameraName);
+    hr = AMovieSetupUnregisterServer(camera->clsid);
+    printf("UnregisterCameraByName: Camera CLSID unregistration returned 0x%08X (%s)\n", 
+        hr, SUCCEEDED(hr) ? "SUCCESS" : "FAILED");
+        
+    // Unregister property page CLSID
+    printf("UnregisterCameraByName: Unregistering property page CLSID for '%s'\n", cameraName);
+    HRESULT hrProp = AMovieSetupUnregisterServer(camera->propPageClsid);
+    printf("UnregisterCameraByName: Property page CLSID unregistration returned 0x%08X (%s)\n", 
+        hrProp, SUCCEEDED(hrProp) ? "SUCCESS" : "FAILED");
+    
+    // Mark camera as unregistered in manager
+    manager->SetCameraRegistered(cameraName, false);
+    
+    // Return success if either succeeded (property page failure is not critical)
+    return SUCCEEDED(hr) ? hr : hrProp;
 }
 
 HRESULT RegisterSingleCameraFilter( BOOL bRegister, int cameraIndex )

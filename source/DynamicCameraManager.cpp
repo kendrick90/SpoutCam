@@ -143,6 +143,30 @@ bool DynamicCameraManager::DeleteCamera(const std::string& cameraName) {
     return false;
 }
 
+bool DynamicCameraManager::UpdateCameraName(const std::string& oldName, const std::string& newName) {
+    auto it = m_cameras.find(oldName);
+    if (it != m_cameras.end()) {
+        // Get the camera config
+        DynamicCameraConfig config = it->second;
+        
+        // Update internal mappings - remove old entries
+        m_clsidToName.erase(GuidToString(config.clsid));
+        m_propPageClsidToName.erase(GuidToString(config.propPageClsid));
+        m_cameras.erase(it);
+        
+        // Update camera name
+        config.name = newName;
+        
+        // Add back with new name
+        m_cameras[newName] = config;
+        m_clsidToName[GuidToString(config.clsid)] = newName;
+        m_propPageClsidToName[GuidToString(config.propPageClsid)] = newName;
+        
+        return true;
+    }
+    return false;
+}
+
 std::vector<DynamicCameraConfig*> DynamicCameraManager::GetAllCameras() {
     std::vector<DynamicCameraConfig*> cameras;
     for (auto& pair : m_cameras) {

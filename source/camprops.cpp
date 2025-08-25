@@ -14,10 +14,23 @@
 // For dialog drawing
 static HBRUSH g_hbrBkgnd = NULL;
 
-// Tab control management
-static int g_currentCameraTab = 0;
-static int g_maxCameraCount = 8;  // Support up to 8 camera instances
-static int g_activeCameras = 1;   // Start with 1 camera tab
+// Legacy tab control variables removed - tabs are no longer used
+
+// Initialize properties dialog with current camera settings
+void CSpoutCamProperties::InitializeProps()
+{
+	// Load and display the current camera name in the edit field
+	HWND hwndCameraName = GetDlgItem(this->m_Dlg, IDC_CAMERA_NAME_EDIT);
+	if (hwndCameraName && !m_cameraName.empty()) {
+		// Convert camera name to wide string and display it
+		wchar_t wideCameraName[256];
+		MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, wideCameraName, 256);
+		Edit_SetText(hwndCameraName, wideCameraName);
+	}
+	
+	// Initialize other camera-specific settings
+	UpdateCameraDisplay();
+}
 
 // CreateInstance
 // Used by the DirectShow base classes to create instances
@@ -269,12 +282,7 @@ INT_PTR CSpoutCamProperties::OnReceiveMessage(HWND hwnd, UINT uMsg, WPARAM wPara
 
 	case WM_NOTIFY:
 		{
-			LPNMHDR lpnmhdr = (LPNMHDR)lParam;
-			if (lpnmhdr->idFrom == IDC_CAMERA_TABS && lpnmhdr->code == TCN_SELCHANGE) {
-				// Tab selection changed
-				OnTabSelectionChange();
-				return (LRESULT)1;
-			}
+			// Tab control removed - no notification handling needed
 			break;
 		}
 	}
@@ -387,7 +395,7 @@ HRESULT CSpoutCamProperties::OnActivate()
 	// Fps
 	////////////////////////////////////////
 
-	// Initialize fps dropdown with defaults (actual values loaded per-camera by InitializeTabControl)
+	// Initialize fps dropdown with defaults (actual values loaded by InitializeProps)
 	dwValue = 1; // default 1 = 30 fps
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_FPS);
@@ -419,7 +427,7 @@ HRESULT CSpoutCamProperties::OnActivate()
 	// Resolution
 	////////////////////////////////////////
 
-	// Initialize resolution dropdown with defaults (actual values loaded per-camera by InitializeTabControl)
+	// Initialize resolution dropdown with defaults (actual values loaded by InitializeProps)
 	dwValue = 0; // default 0 = active sender
 
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_RESOLUTION);
@@ -454,7 +462,7 @@ HRESULT CSpoutCamProperties::OnActivate()
 	// Camera Name
 	////////////////////////////////////////
 	
-	// Initialize camera name edit field (actual value loaded per-camera by InitializeTabControl)
+	// Initialize camera name edit field (actual value loaded by InitializeProps)
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_CAMERA_NAME_EDIT);
 	Edit_SetText(hwndCtl, L"");
 
@@ -462,12 +470,12 @@ HRESULT CSpoutCamProperties::OnActivate()
 	// Starting sender name
 	////////////////////////////////////////
 
-	// Initialize sender name (actual values loaded per-camera by InitializeTabControl)
+	// Initialize sender name (actual values loaded by InitializeProps)
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_NAME);
 	Edit_SetText(hwndCtl, L"");
 
 	////////////////////////////////////////
-	// Mirror, Swap, Flip - Initialize with defaults (actual values loaded per-camera by InitializeTabControl)
+	// Mirror, Swap, Flip - Initialize with defaults (actual values loaded by InitializeProps)
 	////////////////////////////////////////
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_MIRROR);
 	Button_SetCheck(hwndCtl, 0);
@@ -491,8 +499,8 @@ HRESULT CSpoutCamProperties::OnActivate()
 	hwndCtl = GetDlgItem(this->m_Dlg, IDC_VERS);
 	Static_SetText(hwndCtl, L"Version: " _VER_VERSION_STRING);
 
-	// Initialize tab control
-	InitializeTabControl();
+	// Initialize properties dialog
+	InitializeProps();
 
 	m_bIsInitialized = TRUE;
 
@@ -805,36 +813,46 @@ void CSpoutCamProperties::UnregisterCameras()
 	}
 }
 
-// Register single camera - simplified without UAC elevation for now  
+// Register single camera using camera name (no index needed)
 void CSpoutCamProperties::RegisterSingleCamera(int cameraIndex)
 {
-	HRESULT hr = RegisterSingleCameraFilter(TRUE, cameraIndex);
+	// Use the current camera name instead of index
+	HRESULT hr = RegisterCameraByName(m_cameraName.c_str());
 	if (SUCCEEDED(hr)) {
 		if (!m_bSilent) {
 			wchar_t message[256];
-			swprintf_s(message, L"SpoutCam%d registered successfully!", cameraIndex + 1);
+			wchar_t wideCameraName[256];
+			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, wideCameraName, 256);
+			swprintf_s(message, L"%s registered successfully!", wideCameraName);
 			MessageBox(m_Dlg, message, L"Registration", MB_OK | MB_ICONINFORMATION);
 		}
 	} else {
 		wchar_t message[256];
-		swprintf_s(message, L"Failed to register SpoutCam%d.\n\nThis may require administrator privileges.", cameraIndex + 1);
+		wchar_t wideCameraName[256];
+		MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, wideCameraName, 256);
+		swprintf_s(message, L"Failed to register %s.\n\nThis may require administrator privileges.", wideCameraName);
 		MessageBox(m_Dlg, message, L"Registration Error", MB_OK | MB_ICONERROR);
 	}
 }
 
-// Unregister single camera - simplified without UAC elevation for now
+// Unregister single camera using camera name (no index needed)
 void CSpoutCamProperties::UnregisterSingleCamera(int cameraIndex)
 {
-	HRESULT hr = RegisterSingleCameraFilter(FALSE, cameraIndex);
+	// Use the current camera name instead of index  
+	HRESULT hr = UnregisterCameraByName(m_cameraName.c_str());
 	if (SUCCEEDED(hr)) {
 		if (!m_bSilent) {
 			wchar_t message[256];
-			swprintf_s(message, L"SpoutCam%d unregistered successfully!", cameraIndex + 1);
+			wchar_t wideCameraName[256];
+			MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, wideCameraName, 256);
+			swprintf_s(message, L"%s unregistered successfully!", wideCameraName);
 			MessageBox(m_Dlg, message, L"Unregistration", MB_OK | MB_ICONINFORMATION);
 		}
 	} else {
 		wchar_t message[256];
-		swprintf_s(message, L"Failed to unregister SpoutCam%d.\n\nThis may require administrator privileges.", cameraIndex + 1);
+		wchar_t wideCameraName[256];
+		MultiByteToWideChar(CP_ACP, 0, m_cameraName.c_str(), -1, wideCameraName, 256);
+		swprintf_s(message, L"Failed to unregister %s.\n\nThis may require administrator privileges.", wideCameraName);
 		MessageBox(m_Dlg, message, L"Unregistration Error", MB_OK | MB_ICONERROR);
 	}
 }
@@ -891,94 +909,34 @@ void CSpoutCamProperties::UnregisterCurrentCamera()
 	}
 }
 
-// Initialize the properties dialog for a single camera
-void CSpoutCamProperties::InitializeTabControl()
-{
-	// This is now a single camera properties dialog - no tabs or multi-camera controls
-	g_currentCameraTab = m_cameraIndex;
-	g_activeCameras = 1;
-	
-	// Update the display for this camera
-	UpdateCameraDisplay();
-}
+// Legacy tab functions removed (now handled by InitializeProps)
 
 // Add a new camera tab
 void CSpoutCamProperties::AddCameraTab()
 {
-	if (g_activeCameras >= g_maxCameraCount) {
-		MessageBox(m_Dlg, L"Maximum number of cameras reached!", L"Add Camera", MB_OK | MB_ICONWARNING);
-		return;
-	}
-
-	HWND hwndTab = GetDlgItem(this->m_Dlg, IDC_CAMERA_TABS);
-	if (!hwndTab) return;
-
-	// Add new tab
-	TCITEM tie = {0};
-	tie.mask = TCIF_TEXT;
-	
-	wchar_t tabName[32];
-	swprintf_s(tabName, L"SpoutCam%d", g_activeCameras + 1);
-	tie.pszText = tabName;
-	
-	TabCtrl_InsertItem(hwndTab, g_activeCameras, &tie);
-	g_activeCameras++;
-	
-	// Select the new tab
-	TabCtrl_SetCurSel(hwndTab, g_activeCameras - 1);
-	g_currentCameraTab = g_activeCameras - 1;
-	
-	// Update display for new camera
-	UpdateCameraDisplay();
+	// Legacy function - tabs removed from properties dialog
+	// Functionality moved to SpoutCamSettings manager UI
 }
 
 // Remove the current camera tab
 void CSpoutCamProperties::RemoveCameraTab()
 {
-	if (g_activeCameras <= 1) {
-		MessageBox(m_Dlg, L"Cannot remove the last camera!", L"Remove Camera", MB_OK | MB_ICONWARNING);
-		return;
-	}
-
-	HWND hwndTab = GetDlgItem(this->m_Dlg, IDC_CAMERA_TABS);
-	if (!hwndTab) return;
-
-	// Remove the current tab
-	TabCtrl_DeleteItem(hwndTab, g_currentCameraTab);
-	g_activeCameras--;
-	
-	// Adjust current tab selection
-	if (g_currentCameraTab >= g_activeCameras) {
-		g_currentCameraTab = g_activeCameras - 1;
-	}
-	
-	TabCtrl_SetCurSel(hwndTab, g_currentCameraTab);
-	
-	// Update display for current camera
-	UpdateCameraDisplay();
+	// Legacy function - tabs removed from properties dialog
+	// Functionality moved to SpoutCamSettings manager UI
 }
 
 // Handle tab selection change
 void CSpoutCamProperties::OnTabSelectionChange()
 {
-	HWND hwndTab = GetDlgItem(this->m_Dlg, IDC_CAMERA_TABS);
-	if (!hwndTab) return;
-
-	// Save current camera settings before switching
-	SaveCurrentCameraSettings();
-	
-	// Get new selection
-	g_currentCameraTab = TabCtrl_GetCurSel(hwndTab);
-	
-	// Update display for selected camera
-	UpdateCameraDisplay();
+	// Legacy function - tabs removed from properties dialog
+	// No tab switching needed
 }
 
-// Update the display for the current camera tab
+// Update the display for the current camera
 void CSpoutCamProperties::UpdateCameraDisplay()
 {
-	// Load settings for the current camera
-	LoadCameraSettings(m_cameraIndex);
+	// Load settings for the current camera (LoadCameraSettings handles camera name lookup)
+	LoadCameraSettings(0); // Index parameter is ignored, function uses camera name internally
 	
 	// Force refresh of all controls to fix rendering issues
 	RefreshControlsDisplay();
@@ -1352,24 +1310,20 @@ void CSpoutCamProperties::UpdateCameraName(const char* newName)
 		RegDeleteTreeA(HKEY_CURRENT_USER, oldRegistryPath);
 	}
 	
-	// Update the camera name in DynamicCameraManager
+	// Update the camera name in DynamicCameraManager (rename in-place)
 	auto currentCamera = manager->GetCamera(m_cameraName);
 	if (currentCamera) {
-		// Create a new camera with the new name and same settings
-		auto newCamera = manager->CreateCamera(newName);
-		if (newCamera) {
-			// Copy settings from old camera to new camera
-			newCamera->senderName = currentCamera->senderName;
-			newCamera->isRegistered = currentCamera->isRegistered;
-			
-			// Save the new camera to registry
-			manager->SaveCameraToRegistry(*newCamera);
-			
-			// Delete the old camera from manager
-			manager->DeleteCamera(m_cameraName);
-			
-			// Update our current camera name
-			m_cameraName = newName;
-		}
+		// Rename the existing camera in-place instead of creating new one
+		std::string oldName = currentCamera->name;
+		currentCamera->name = newName;
+		
+		// Update the internal mappings in the manager
+		manager->UpdateCameraName(oldName, newName);
+		
+		// Save the renamed camera to registry under new name
+		manager->SaveCameraToRegistry(*currentCamera);
+		
+		// Update our current camera name
+		m_cameraName = newName;
 	}
 }

@@ -14,7 +14,7 @@ cd /d "%SCRIPT_DIR%"
 :: Define paths
 set "MSBUILD_PATH=C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
 
-echo Building both x64 and x86...
+echo Building both x64 and x86
 
 :BUILD_BOTH
 call :BuildArch x64
@@ -50,13 +50,13 @@ echo ===============================================
 echo Building %ARCH% version
 echo ===============================================
 
-echo Step 1: Unregistering existing SpoutCam filters...
-echo - Clearing registrations to prevent file locks...
+echo Step 1: Unregistering existing SpoutCam filters
+echo - Clearing registrations to prevent file locks
 
 call :UnregisterSpoutCam
 
 echo.
-echo Step 2: Building %ARCH% solution...
+echo Step 2: Building %ARCH% solution
 echo - MSBuild Command: "%MSBUILD_PATH%" SpoutCamDX.sln -p:Configuration=Release -p:Platform=%PLATFORM% -verbosity:minimal
 echo - Expected output: %BINARIES_AX%
 echo - Checking if output directory exists: binaries\SPOUTCAM\SpoutCam%DIR_ARCH%\
@@ -65,23 +65,23 @@ if not exist "binaries\SPOUTCAM\SpoutCam%DIR_ARCH%\" (
     mkdir "binaries\SPOUTCAM\SpoutCam%DIR_ARCH%\"
 )
 
-echo - Starting build...
+echo - Starting build
 "%MSBUILD_PATH%" SpoutCamDX.sln -p:Configuration=Release -p:Platform=%PLATFORM% -verbosity:minimal
 
-echo - DEBUG: MSBuild completed, checking error level...
+echo - DEBUG: MSBuild completed, checking error level
 set BUILD_RESULT=%ERRORLEVEL%
 echo - DEBUG: Build result is: %BUILD_RESULT%
 
-echo - DEBUG: About to check if build failed...
+echo - DEBUG: About to check if build failed
 if "%BUILD_RESULT%" neq "0" (
     echo.
     echo *** %ARCH% BUILD FAILED Error Level: %BUILD_RESULT% ***
     exit /b 1
 )
-echo - DEBUG: Build check passed, continuing...
+echo - DEBUG: Build check passed, continuing
 
 echo.
-echo Step 3: Verifying build output...
+echo Step 3: Verifying build output
 echo - DEBUG: Checking for output file: %BINARIES_AX%
 echo - DEBUG: ARCH variable is: %ARCH%
 echo - DEBUG: DIR_ARCH variable is: %DIR_ARCH%
@@ -104,7 +104,7 @@ if exist "%BINARIES_AX%" (
 )
 
 echo.
-echo Step 4: Verifying SpoutCamSettings.exe build...
+echo Step 4: Verifying SpoutCamSettings.exe build
 if exist "binaries\SPOUTCAM\SpoutCamSettings.exe" (
     echo - SUCCESS: SpoutCamSettings.exe built successfully
     for %%i in ("binaries\SPOUTCAM\SpoutCamSettings.exe") do (
@@ -137,7 +137,7 @@ echo.
 echo To test: Use SpoutCamProperties.cmd or register individual cameras
 echo through the properties dialog.
 echo.
-echo Build process completed! Press any key to exit...
+echo Build process completed! Press any key to exit
 pause >nul
 exit /b 0
 
@@ -149,7 +149,7 @@ echo ===============================================
 echo.
 echo One or more builds failed. Please check the error messages above.
 echo.
-echo Build process failed! Press any key to exit...
+echo Build process failed! Press any key to exit
 pause >nul
 exit /b 1
 
@@ -160,7 +160,7 @@ for %%i in (%1) do (
 goto :eof
 
 :UnregisterSpoutCam
-echo - Checking if SpoutCam filters are registered...
+echo - Checking if SpoutCam filters are registered
 
 :: Check if any SpoutCam filters are registered
 powershell -Command "if (Get-Process | Where-Object {$_.ProcessName -match 'regsvr32'}) { Stop-Process -Name regsvr32 -Force -ErrorAction SilentlyContinue }" 2>nul
@@ -169,29 +169,41 @@ powershell -Command "if (Get-Process | Where-Object {$_.ProcessName -match 'regs
 powershell -Command "$found = $false; Get-ChildItem 'HKLM:\SOFTWARE\Classes\CLSID' -ErrorAction SilentlyContinue | ForEach-Object { $default = Get-ItemProperty $_.PSPath -Name '(default)' -ErrorAction SilentlyContinue; if ($default.'(default)' -match 'SpoutCam') { Write-Host 'Found CLSID:' $_.PSChildName '=' $default.'(default)'; $found = $true } }; Get-ChildItem 'HKLM:\SOFTWARE\Classes\CLSID\{083863F1-70DE-11D0-BD40-00A0C911CE86}\Instance' -ErrorAction SilentlyContinue | ForEach-Object { $friendlyName = Get-ItemProperty $_.PSPath -Name 'FriendlyName' -ErrorAction SilentlyContinue; if ($friendlyName.FriendlyName -match 'SpoutCam') { Write-Host 'Found DirectShow filter:' $friendlyName.FriendlyName; $found = $true } }; if ($found) { Write-Host '- SpoutCam filters ARE registered - unregistration required'; Write-Host 'CAMERAS_FOUND' } else { Write-Host '- No SpoutCam filters found in registry'; Write-Host 'NO_CAMERAS' }" 2>nul | findstr "CAMERAS_FOUND" >nul
 
 if %ERRORLEVEL% equ 0 (
-    echo - Attempting unregistration with ADMIN privileges UAC prompt will appear...
+    echo - Attempting unregistration with ADMIN privileges UAC prompt will appear
 ) else (
     echo - No unregistration needed - skipping to build
     goto :SkipUnregistration
 )
 
-:: Only check files relevant to current architecture being built
+:: Use the same cleanup method as the UI cleanup button (works reliably)
 if "%ARCH%"=="x64" (
-    set "FILES_TO_CHECK="binaries\SPOUTCAM\SpoutCam64\SpoutCam64.ax""
+    set "SETTINGS_EXE=binaries\SPOUTCAM\SpoutCamSettings64.exe"
 ) else (
-    set "FILES_TO_CHECK="binaries\SPOUTCAM\SpoutCam32\SpoutCam32.ax""
+    set "SETTINGS_EXE=binaries\SPOUTCAM\SpoutCamSettings32.exe"
 )
 
-for %%f in (%FILES_TO_CHECK%) do (
-    if exist %%f (
-        echo   Unregistering all cameras from %%f using DllUnregisterServer...
-        echo   (UAC prompt will appear - please click Yes to continue)
-        powershell -Command "Start-Process cmd -ArgumentList '/c cd /d \"%CD%\" && rundll32 %%f,DllUnregisterServer' -Verb RunAs -Wait -WindowStyle Hidden" 2>nul
-        echo   - DllUnregisterServer completed for %%f
+if exist "%SETTINGS_EXE%" (
+    echo   Using SpoutCamSettings cleanup (same method as UI cleanup button)
+    echo   (UAC prompt will appear - please click Yes to continue)
+    powershell -Command "Start-Process \"%SETTINGS_EXE%\" -ArgumentList '--cleanup-all' -Verb RunAs -Wait" 2>nul
+    echo   - SpoutCamSettings cleanup completed
+) else (
+    echo   WARNING: %SETTINGS_EXE% not found, using fallback method
+    :: Fallback: Call SpoutCamSettings directly if available
+    if exist "binaries\SPOUTCAM\SpoutCamSettings.exe" (
+        echo   Using fallback SpoutCamSettings.exe
+        powershell -Command "Start-Process 'binaries\SPOUTCAM\SpoutCamSettings.exe' -ArgumentList '--cleanup-all' -Verb RunAs -Wait" 2>nul
+        echo   - Fallback cleanup completed
+    ) else (
+        echo   ERROR: No SpoutCamSettings executable found for cleanup
+        echo   Please manually run cleanup from SpoutCamSettings UI
     )
 )
 
-echo - Verifying unregistration was successful...
+echo - Killing any remaining SpoutCamSettings processes
+powershell -Command "Get-Process -Name '*SpoutCam*' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host 'Terminating process:' $_.Name 'PID:' $_.Id; Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }" 2>nul
+timeout /t 2 /nobreak >nul
+echo - Verifying unregistration was successful
 powershell -Command "$found = $false; Get-ChildItem 'HKLM:\SOFTWARE\Classes\CLSID' -ErrorAction SilentlyContinue | ForEach-Object { $default = Get-ItemProperty $_.PSPath -Name '(default)' -ErrorAction SilentlyContinue; if ($default.'(default)' -match 'SpoutCam') { $found = $true } }; Get-ChildItem 'HKLM:\SOFTWARE\Classes\CLSID\{083863F1-70DE-11D0-BD40-00A0C911CE86}\Instance' -ErrorAction SilentlyContinue | ForEach-Object { $friendlyName = Get-ItemProperty $_.PSPath -Name 'FriendlyName' -ErrorAction SilentlyContinue; if ($friendlyName.FriendlyName -match 'SpoutCam') { $found = $true } }; if ($found) { Write-Host '- ERROR: SpoutCam filters are STILL registered!'; Write-Host '- Build cannot continue safely - please manually unregister using SpoutCamProperties'; exit 1 } else { Write-Host '- SUCCESS: All SpoutCam filters have been unregistered'; exit 0 }" 2>nul
 
 if %ERRORLEVEL% neq 0 (
@@ -206,7 +218,7 @@ if %ERRORLEVEL% neq 0 (
 
 :SkipUnregistration
 
-echo - Testing if target file is ready for build...
+echo - Testing if target file is ready for build
 if exist "%BINARIES_AX%" (
     copy "%BINARIES_AX%" "%BINARIES_AX%.test" >nul 2>&1
     if exist "%BINARIES_AX%.test" (

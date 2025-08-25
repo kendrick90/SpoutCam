@@ -52,8 +52,8 @@ private:
 	void RegisterCurrentCamera();
 	void UnregisterCurrentCamera();
 	
-	// Tab control methods for multi-camera management
-	void InitializeTabControl();
+	// Properties initialization and legacy tab compatibility functions
+	void InitializeProps();
 	void AddCameraTab();
 	void RemoveCameraTab();
 	void OnTabSelectionChange();
