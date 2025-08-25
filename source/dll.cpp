@@ -368,9 +368,34 @@ STDAPI RegisterCameraByName(const char* cameraName)
             hr, SUCCEEDED(hr) ? "SUCCESS" : "FAILED");
     }
     
+    // CRITICAL: Register the filter in DirectShow VideoInputDeviceCategory
+    // This is what makes the camera visible to video applications
     if (SUCCEEDED(hr)) {
-        // Mark camera as registered in manager
-        manager->SetCameraRegistered(cameraName, true);
+        printf("RegisterCameraByName: Registering filter in VideoInputDeviceCategory for '%s'\n", cameraName);
+        
+        IFilterMapper2 *fm = 0;
+        hr = CoCreateInstance(CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER, IID_IFilterMapper2, (void **)&fm);
+        printf("RegisterCameraByName: CoCreateInstance(FilterMapper2) returned 0x%08X\n", hr);
+        
+        if (SUCCEEDED(hr)) {
+            IMoniker *pMoniker = 0;
+            REGFILTER2 rf2;
+            rf2.dwVersion = 1;
+            rf2.dwMerit = MERIT_DO_NOT_USE;
+            rf2.cPins = 1;
+            rf2.rgPins = &AMSPinVCam;
+            
+            hr = fm->RegisterFilter(camera->clsid, wideCameraName, &pMoniker, &CLSID_VideoInputDeviceCategory, NULL, &rf2);
+            printf("RegisterCameraByName: RegisterFilter returned 0x%08X (%s)\n", 
+                hr, SUCCEEDED(hr) ? "SUCCESS" : "FAILED");
+            
+            fm->Release();
+        }
+    }
+    
+    if (SUCCEEDED(hr)) {
+        // Mark camera as active in manager
+        manager->SetCameraActive(cameraName, true);
     }
     
     return hr;
@@ -409,8 +434,23 @@ STDAPI UnregisterCameraByName(const char* cameraName)
     printf("UnregisterCameraByName: Property page CLSID unregistration returned 0x%08X (%s)\n", 
         hrProp, SUCCEEDED(hrProp) ? "SUCCESS" : "FAILED");
     
-    // Mark camera as unregistered in manager
-    manager->SetCameraRegistered(cameraName, false);
+    // CRITICAL: Unregister the filter from DirectShow VideoInputDeviceCategory
+    // This removes the camera from video applications
+    printf("UnregisterCameraByName: Unregistering filter from VideoInputDeviceCategory for '%s'\n", cameraName);
+    
+    IFilterMapper2 *fm = 0;
+    HRESULT hrFilter = CoCreateInstance(CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER, IID_IFilterMapper2, (void **)&fm);
+    printf("UnregisterCameraByName: CoCreateInstance(FilterMapper2) returned 0x%08X\n", hrFilter);
+    
+    if (SUCCEEDED(hrFilter)) {
+        hrFilter = fm->UnregisterFilter(&CLSID_VideoInputDeviceCategory, 0, camera->clsid);
+        printf("UnregisterCameraByName: UnregisterFilter returned 0x%08X (%s)\n", 
+            hrFilter, SUCCEEDED(hrFilter) ? "SUCCESS" : "FAILED");
+        fm->Release();
+    }
+    
+    // Mark camera as inactive in manager
+    manager->SetCameraActive(cameraName, false);
     
     // Return success if either succeeded (property page failure is not critical)
     return SUCCEEDED(hr) ? hr : hrProp;

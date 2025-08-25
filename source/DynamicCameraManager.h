@@ -9,6 +9,17 @@
 // Dynamic Camera Management System
 // This replaces the fixed slot-based system with a fully dynamic approach
 // where CLSIDs are generated based on camera names
+//
+// IMPORTANT DISTINCTION:
+// 1. CLSID Registration (isActive): Makes camera visible to Windows/DirectShow apps
+//    - Registers Windows COM server with unique CLSID for each camera
+//    - Required for apps to discover and use the camera
+//    - Temporary - can be toggled on/off without data loss
+//
+// 2. Settings Persistence (hasSettings): Saves user preferences to registry
+//    - Stores camera properties (FPS, resolution, sender name, etc.)
+//    - Persists even when camera is deactivated/inactive
+//    - Independent of CLSID registration status
 
 namespace SpoutCam {
 
@@ -17,10 +28,11 @@ struct DynamicCameraConfig {
     std::string name;
     GUID clsid;
     GUID propPageClsid;
-    bool isRegistered;
+    bool isActive;           // DirectShow filter active/available in apps
+    bool hasSettings;        // Camera has saved properties/settings
     std::string senderName;  // Associated Spout sender
     
-    DynamicCameraConfig() : isRegistered(false) {
+    DynamicCameraConfig() : isActive(false), hasSettings(false) {
         memset(&clsid, 0, sizeof(GUID));
         memset(&propPageClsid, 0, sizeof(GUID));
     }
@@ -63,9 +75,11 @@ public:
     bool SaveCameraToRegistry(const DynamicCameraConfig& camera);
     bool DeleteCameraFromRegistry(const std::string& cameraName);
     
-    // Registration status
-    bool IsCameraRegistered(const std::string& cameraName);
-    void SetCameraRegistered(const std::string& cameraName, bool registered);
+    // Camera status
+    bool IsCameraActive(const std::string& cameraName);
+    void SetCameraActive(const std::string& cameraName, bool active);
+    bool CameraHasSettings(const std::string& cameraName);
+    void SetCameraHasSettings(const std::string& cameraName, bool hasSettings);
     
     // Find available name
     std::string GenerateAvailableName(const std::string& baseName = "SpoutCam");

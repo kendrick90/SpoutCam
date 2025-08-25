@@ -48,8 +48,8 @@ void PopulateCameraList(HWND hListView);
 void ScanDynamicCameras();
 void RefreshCameraList(HWND hListView);
 void AutoRefreshCameraList(HWND hListView);
-bool RegisterCameraByName(const std::string& cameraName);
-bool UnregisterCameraByName(const std::string& cameraName);
+bool ActivateCameraByName(const std::string& cameraName);
+bool DeactivateCameraByName(const std::string& cameraName);
 void OpenCameraPropertiesByName(const std::string& cameraName);
 bool CreateNewCamera(const char* name);
 bool RemoveCameraByName(const std::string& cameraName);
@@ -320,10 +320,10 @@ bool RemoveCameraByName(const std::string& cameraName)
         return false;
     }
     
-    // First unregister if registered
-    if (camera->isRegistered) {
-        if (!UnregisterCameraByName(cameraName)) {
-            LOG("Failed to unregister camera '%s' before removal\n", cameraName.c_str());
+    // First deactivate if active
+    if (camera->isActive) {
+        if (!DeactivateCameraByName(cameraName)) {
+            LOG("Failed to deactivate camera '%s' before removal\n", cameraName.c_str());
             // Continue anyway to clean up registry
         }
     }
@@ -472,7 +472,7 @@ void AutoRefreshCameraList(HWND hListView)
         for (size_t i = 0; i < cameras.size(); i++) {
             if (i >= lastCameraStates.size() || 
                 lastCameraStates[i].first != cameras[i]->name || 
-                lastCameraStates[i].second != cameras[i]->isRegistered) {
+                lastCameraStates[i].second != cameras[i]->isActive) {
                 needsUpdate = true;
                 break;
             }
@@ -483,7 +483,7 @@ void AutoRefreshCameraList(HWND hListView)
     if (needsUpdate) {
         lastCameraStates.clear();
         for (const auto& camera : cameras) {
-            lastCameraStates.push_back({camera->name, camera->isRegistered});
+            lastCameraStates.push_back({camera->name, camera->isActive});
         }
         
         LOG("Camera state changed, updating list display\n");
@@ -533,11 +533,12 @@ void PopulateCameraList(HWND hListView)
         
         int itemIndex = ListView_InsertItem(hListView, &lvi);
         
-        // Set registration status
-        ListView_SetItemText(hListView, itemIndex, 1, (LPSTR)(camera->isRegistered ? "Registered" : "Not Registered"));
+        // Set activation status
+        ListView_SetItemText(hListView, itemIndex, 1, (LPSTR)(camera->isActive ? "Active" : "Inactive"));
         
-        // Set configuration status
-        ListView_SetItemText(hListView, itemIndex, 2, (LPSTR)"Default");
+        // Set configuration status based on whether camera has saved settings
+        const char* settingsStatus = camera->hasSettings ? "Custom" : "Default";
+        ListView_SetItemText(hListView, itemIndex, 2, (LPSTR)settingsStatus);
     }
     
     // If no cameras exist, show a helpful message
@@ -571,9 +572,9 @@ void PopulateCameraList(HWND hListView)
 }
 
 // New dynamic camera registration function
-bool RegisterCameraByName(const std::string& cameraName)
+bool ActivateCameraByName(const std::string& cameraName)
 {
-    LOG("Registering dynamic camera '%s'\n", cameraName.c_str());
+    LOG("Activating dynamic camera '%s'\n", cameraName.c_str());
     
     auto manager = SpoutCam::DynamicCameraManager::GetInstance();
     auto camera = manager->GetCamera(cameraName);
@@ -625,7 +626,7 @@ bool RegisterCameraByName(const std::string& cameraName)
     
     bool success = SUCCEEDED(hr);
     if (success) {
-        manager->SetCameraRegistered(cameraName, true);
+        manager->SetCameraActive(cameraName, true);
         LOG("Registration result: 0x%08X (SUCCESS)\n", hr);
         LOG("Dynamic camera '%s' registered successfully\n", cameraName.c_str());
     } else {
@@ -683,9 +684,9 @@ bool RegisterLegacyCamera(int cameraIndex)
 }
 
 // New dynamic camera unregistration function
-bool UnregisterCameraByName(const std::string& cameraName)
+bool DeactivateCameraByName(const std::string& cameraName)
 {
-    LOG("Unregistering dynamic camera '%s'\n", cameraName.c_str());
+    LOG("Deactivating dynamic camera '%s'\n", cameraName.c_str());
     
     auto manager = SpoutCam::DynamicCameraManager::GetInstance();
     auto camera = manager->GetCamera(cameraName);
@@ -735,7 +736,7 @@ bool UnregisterCameraByName(const std::string& cameraName)
     
     bool success = SUCCEEDED(hr);
     if (success) {
-        manager->SetCameraRegistered(cameraName, false);
+        manager->SetCameraActive(cameraName, false);
         LOG("Dynamic camera '%s' unregistered successfully\n", cameraName.c_str());
     } else {
         LOG("Failed to unregister dynamic camera '%s'\n", cameraName.c_str());
@@ -793,6 +794,10 @@ bool UnregisterLegacyCamera(int cameraIndex)
 void OpenCameraPropertiesByName(const std::string& cameraName)
 {
     LOG("Opening properties for dynamic camera '%s'\n", cameraName.c_str());
+    
+    // NOTE: When properties are saved in the properties dialog (camprops.cpp),
+    // that dialog should call manager->SetCameraHasSettings(cameraName, true)
+    // to mark this camera as having custom settings
     
     // Detect process architecture
 #ifdef _WIN64
@@ -1065,11 +1070,11 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                 // Camera was created successfully, automatically register it
                                 LOG("New camera '%s' added successfully\n", defaultName.c_str());
                                 
-                                // Automatically register the new camera so property pages work immediately
-                                if (RegisterCameraByName(defaultName)) {
-                                    LOG("New camera '%s' auto-registered successfully\n", defaultName.c_str());
+                                // Automatically activate the new camera so property pages work immediately
+                                if (ActivateCameraByName(defaultName)) {
+                                    LOG("New camera '%s' auto-activated successfully\n", defaultName.c_str());
                                 } else {
-                                    LOG("Failed to auto-register new camera '%s'\n", defaultName.c_str());
+                                    LOG("Failed to auto-activate new camera '%s'\n", defaultName.c_str());
                                 }
                                 
                                 // Refresh the list to show the registered state
@@ -1118,14 +1123,14 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                             
                             if (selected != -1 && selected < (int)cameras.size()) {
                                 const std::string cameraName = cameras[selected]->name; // Copy name
-                                if (RegisterCameraByName(cameraName)) {
+                                if (ActivateCameraByName(cameraName)) {
                                     RefreshCameraList(hListView);
-                                    LOG("Camera '%s' registered successfully\n", cameraName.c_str());
+                                    LOG("Camera '%s' activated successfully\n", cameraName.c_str());
                                 } else {
-                                    LOG("Failed to register camera '%s'\n", cameraName.c_str());
+                                    LOG("Failed to activate camera '%s'\n", cameraName.c_str());
                                 }
                             } else {
-                                MessageBox(hDlg, "Please select a camera to register.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
+                                MessageBox(hDlg, "Please select a camera to activate.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
                             }
                         }
                         break;
@@ -1138,14 +1143,14 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                             
                             if (selected != -1 && selected < (int)cameras.size()) {
                                 const std::string cameraName = cameras[selected]->name; // Copy name
-                                if (UnregisterCameraByName(cameraName)) {
+                                if (DeactivateCameraByName(cameraName)) {
                                     RefreshCameraList(hListView);
-                                    LOG("Camera '%s' unregistered successfully\n", cameraName.c_str());
+                                    LOG("Camera '%s' deactivated successfully\n", cameraName.c_str());
                                 } else {
-                                    LOG("Failed to unregister camera '%s'\n", cameraName.c_str());
+                                    LOG("Failed to deactivate camera '%s'\n", cameraName.c_str());
                                 }
                             } else {
-                                MessageBox(hDlg, "Please select a camera to unregister.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
+                                MessageBox(hDlg, "Please select a camera to deactivate.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
                             }
                         }
                         break;
@@ -1159,38 +1164,38 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                             if (selected != -1 && selected < (int)cameras.size()) {
                                 const std::string cameraName = cameras[selected]->name; // Copy name
                                 
-                                LOG("Reregistering camera '%s'\n", cameraName.c_str());
+                                LOG("Reactivating camera '%s'\n", cameraName.c_str());
                                 
-                                // First unregister
-                                bool unregisterSuccess = UnregisterCameraByName(cameraName);
+                                // First deactivate
+                                bool deactivateSuccess = DeactivateCameraByName(cameraName);
                                 
-                                // Brief pause to ensure unregistration is complete
+                                // Brief pause to ensure deactivation is complete
                                 Sleep(500);
                                 
-                                // Then register again
-                                bool registerSuccess = RegisterCameraByName(cameraName);
+                                // Then activate again
+                                bool activateSuccess = ActivateCameraByName(cameraName);
                                 
-                                if (unregisterSuccess && registerSuccess) {
+                                if (deactivateSuccess && activateSuccess) {
                                     RefreshCameraList(hListView);
-                                    LOG("Camera '%s' reregistered successfully\n", cameraName.c_str());
+                                    LOG("Camera '%s' reactivated successfully\n", cameraName.c_str());
                                     
                                     // Show success message
                                     char successMsg[256];
-                                    sprintf_s(successMsg, "Camera '%s' has been successfully reregistered.\n\nThe camera is now ready to use in video applications.", cameraName.c_str());
-                                    MessageBox(hDlg, successMsg, "Reregistration Complete", MB_OK | MB_ICONINFORMATION);
+                                    sprintf_s(successMsg, "Camera '%s' has been successfully reactivated.\n\nThe camera is now ready to use in video applications.", cameraName.c_str());
+                                    MessageBox(hDlg, successMsg, "Reactivation Complete", MB_OK | MB_ICONINFORMATION);
                                 } else {
                                     RefreshCameraList(hListView);
-                                    LOG("Failed to reregister camera '%s' (unregister: %s, register: %s)\n", 
+                                    LOG("Failed to reactivate camera '%s' (deactivate: %s, activate: %s)\n", 
                                         cameraName.c_str(), 
-                                        unregisterSuccess ? "success" : "failed",
-                                        registerSuccess ? "success" : "failed");
+                                        deactivateSuccess ? "success" : "failed",
+                                        activateSuccess ? "success" : "failed");
                                     
                                     char errorMsg[256];
-                                    sprintf_s(errorMsg, "Failed to reregister camera '%s'.\n\nCheck the debug console for details.", cameraName.c_str());
-                                    MessageBox(hDlg, errorMsg, "Reregistration Failed", MB_OK | MB_ICONERROR);
+                                    sprintf_s(errorMsg, "Failed to reactivate camera '%s'.\n\nCheck the debug console for details.", cameraName.c_str());
+                                    MessageBox(hDlg, errorMsg, "Reactivation Failed", MB_OK | MB_ICONERROR);
                                 }
                             } else {
-                                MessageBox(hDlg, "Please select a camera to reregister.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
+                                MessageBox(hDlg, "Please select a camera to reactivate.", "SpoutCam Settings", MB_OK | MB_ICONINFORMATION);
                             }
                         }
                         break;
@@ -1288,9 +1293,9 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                 for (auto camera : dynamicCameras) {
                                     LOG("Cleaning up dynamic camera '%s'...\n", camera->name.c_str());
                                     
-                                    // Unregister DirectShow filter if registered
-                                    if (camera->isRegistered) {
-                                        if (UnregisterCameraByName(camera->name)) {
+                                    // Deactivate DirectShow filter if active
+                                    if (camera->isActive) {
+                                        if (DeactivateCameraByName(camera->name)) {
                                             unregisterSuccessCount++;
                                         } else {
                                             unregisterFailCount++;
@@ -1432,9 +1437,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             for (auto camera : dynamicCameras) {
                 LOG("Cleaning up dynamic camera '%s'...\n", camera->name.c_str());
                 
-                // Unregister DirectShow filter if registered
-                if (camera->isRegistered) {
-                    if (UnregisterCameraByName(camera->name)) {
+                // Deactivate DirectShow filter if active
+                if (camera->isActive) {
+                    if (DeactivateCameraByName(camera->name)) {
                         unregisterSuccessCount++;
                     } else {
                         unregisterFailCount++;

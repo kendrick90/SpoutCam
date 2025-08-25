@@ -85,7 +85,8 @@ DynamicCameraConfig* DynamicCameraManager::CreateCamera(const std::string& camer
     config.name = cameraName;
     config.clsid = GenerateCameraClsid(cameraName);
     config.propPageClsid = GeneratePropPageClsid(cameraName);
-    config.isRegistered = false;
+    config.isActive = false;
+    config.hasSettings = false;
     
     // Add to maps
     m_cameras[cameraName] = config;
@@ -245,11 +246,21 @@ bool DynamicCameraManager::LoadCamerasFromRegistry() {
                 config.propPageClsid = GeneratePropPageClsid(config.name);
             }
             
-            // Read registration status
-            DWORD registered = 0;
+            // Read activation status (try new field name first, fall back to old)
+            DWORD active = 0;
             bufferSize = sizeof(DWORD);
-            if (RegQueryValueExA(hCameraKey, "Registered", nullptr, &type, (LPBYTE)&registered, &bufferSize) == ERROR_SUCCESS) {
-                config.isRegistered = (registered != 0);
+            if (RegQueryValueExA(hCameraKey, "Active", nullptr, &type, (LPBYTE)&active, &bufferSize) == ERROR_SUCCESS) {
+                config.isActive = (active != 0);
+            } else if (RegQueryValueExA(hCameraKey, "Registered", nullptr, &type, (LPBYTE)&active, &bufferSize) == ERROR_SUCCESS) {
+                // Backward compatibility
+                config.isActive = (active != 0);
+            }
+            
+            // Read settings status
+            DWORD hasSettings = 0;
+            bufferSize = sizeof(DWORD);
+            if (RegQueryValueExA(hCameraKey, "HasSettings", nullptr, &type, (LPBYTE)&hasSettings, &bufferSize) == ERROR_SUCCESS) {
+                config.hasSettings = (hasSettings != 0);
             }
             
             // Read sender name
@@ -303,9 +314,13 @@ bool DynamicCameraManager::SaveCameraToRegistry(const DynamicCameraConfig& camer
     std::string propClsidStr = GuidToString(camera.propPageClsid);
     RegSetValueExA(hKey, "PropPageCLSID", 0, REG_SZ, (LPBYTE)propClsidStr.c_str(), (DWORD)propClsidStr.length() + 1);
     
-    // Write registration status
-    DWORD registered = camera.isRegistered ? 1 : 0;
-    RegSetValueExA(hKey, "Registered", 0, REG_DWORD, (LPBYTE)&registered, sizeof(DWORD));
+    // Write activation status
+    DWORD active = camera.isActive ? 1 : 0;
+    RegSetValueExA(hKey, "Active", 0, REG_DWORD, (LPBYTE)&active, sizeof(DWORD));
+    
+    // Write settings status
+    DWORD hasSettings = camera.hasSettings ? 1 : 0;
+    RegSetValueExA(hKey, "HasSettings", 0, REG_DWORD, (LPBYTE)&hasSettings, sizeof(DWORD));
     
     // Write sender name
     if (!camera.senderName.empty()) {
@@ -364,15 +379,28 @@ bool DynamicCameraManager::DeleteCameraFromRegistry(const std::string& cameraNam
 }
 
 
-bool DynamicCameraManager::IsCameraRegistered(const std::string& cameraName) {
-    auto camera = GetCamera(cameraName);
-    return camera ? camera->isRegistered : false;
+bool DynamicCameraManager::IsCameraActive(const std::string& cameraName) {
+    DynamicCameraConfig* camera = GetCamera(cameraName);
+    return camera ? camera->isActive : false;
 }
 
-void DynamicCameraManager::SetCameraRegistered(const std::string& cameraName, bool registered) {
-    auto camera = GetCamera(cameraName);
+void DynamicCameraManager::SetCameraActive(const std::string& cameraName, bool active) {
+    DynamicCameraConfig* camera = GetCamera(cameraName);
     if (camera) {
-        camera->isRegistered = registered;
+        camera->isActive = active;
+        SaveCameraToRegistry(*camera);
+    }
+}
+
+bool DynamicCameraManager::CameraHasSettings(const std::string& cameraName) {
+    DynamicCameraConfig* camera = GetCamera(cameraName);
+    return camera ? camera->hasSettings : false;
+}
+
+void DynamicCameraManager::SetCameraHasSettings(const std::string& cameraName, bool hasSettings) {
+    DynamicCameraConfig* camera = GetCamera(cameraName);
+    if (camera) {
+        camera->hasSettings = hasSettings;
         SaveCameraToRegistry(*camera);
     }
 }
