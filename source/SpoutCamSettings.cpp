@@ -1334,26 +1334,33 @@ INT_PTR CALLBACK SettingsDialogProc(HWND hDlg, UINT message, WPARAM wParam, LPAR
                                 // Also clean up all dynamic cameras and their settings
                                 auto manager = SpoutCam::DynamicCameraManager::GetInstance();
                                 auto dynamicCameras = manager->GetAllCameras();
+                                
+                                // Store camera names before deactivation (since deactivation removes from manager)
+                                std::vector<std::string> cameraNames;
                                 for (auto camera : dynamicCameras) {
-                                    LOG("Cleaning up dynamic camera '%s'...\n", camera->name.c_str());
+                                    cameraNames.push_back(camera->name);
+                                }
+                                
+                                for (const std::string& cameraName : cameraNames) {
+                                    LOG("Cleaning up dynamic camera '%s'...\n", cameraName.c_str());
                                     
-                                    // Deactivate DirectShow filter if active
-                                    if (camera->isActive) {
-                                        if (DeactivateCameraByName(camera->name)) {
-                                            unregisterSuccessCount++;
-                                        } else {
-                                            unregisterFailCount++;
+                                    // Deactivate DirectShow filter if active (this also removes from manager)
+                                    if (DeactivateCameraByName(cameraName)) {
+                                        unregisterSuccessCount++;
+                                        configDeletedCount++; // DeactivateCameraByName already cleans registry
+                                    } else {
+                                        unregisterFailCount++;
+                                        // Try to clean registry even if deactivation failed
+                                        if (manager->DeleteCameraFromRegistry(cameraName)) {
+                                            configDeletedCount++;
                                         }
-                                    }
-                                    
-                                    // Delete all registry data for this camera
-                                    if (manager->DeleteCameraFromRegistry(camera->name)) {
-                                        configDeletedCount++;
                                     }
                                 }
                                 
-                                // Force refresh to show updated status (RefreshCameraList handles cleanup internally)
+                                // Force complete cache invalidation and manager cleanup
                                 g_filtersScanned = false;
+                                g_camerasScanned = false;
+                                SpoutCam::DynamicCameraManager::Cleanup();
                                 RefreshCameraList(hListView);
                                 
                                 // Show summary

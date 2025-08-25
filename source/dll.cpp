@@ -1174,6 +1174,9 @@ HRESULT UnregisterCameraInstanceOnly(const GUID& instanceGuid)
     if (result == ERROR_SUCCESS) {
         hr = S_OK;
         printf("UnregisterCameraInstanceOnly: Successfully unregistered instance %ls\n", instanceGuidStr);
+    } else if (result == ERROR_FILE_NOT_FOUND) {
+        hr = S_OK;  // Instance key doesn't exist - this is fine
+        printf("UnregisterCameraInstanceOnly: Instance key %ls already deleted or never existed\n", instanceGuidStr);
     } else {
         printf("UnregisterCameraInstanceOnly: Failed to delete instance key %ls: %ld\n", instanceGuidStr, result);
     }
